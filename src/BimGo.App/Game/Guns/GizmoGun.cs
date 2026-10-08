@@ -70,7 +70,7 @@ namespace BimGo.Game.Guns
             if (!record.Movable)
             {
                 Session.Sound.Play(SoundId.Error);
-                Session.Toast($"Can't move {record.Name}: {record.MoveBlockReason}");
+                Session.Toast($"Can't move {record.Name}: {record.MoveBlockReason}", important: true);
                 return;
             }
 
@@ -142,7 +142,7 @@ namespace BimGo.Game.Guns
                 Session.Dynamics.SetTransform(instance, instance.Offset - delta, instance.Angle - angle);
                 Session.RestoreIfUnmoved(instance);
                 Session.Sound.Play(SoundId.Error);
-                Session.Toast($"{Session.EditTargetName} refused the move ({result.Message}). Restored.", 4f);
+                Session.Toast($"{Session.EditTargetName} refused the move ({result.Message}). Restored.", 4f, important: true);
             });
 
             if (!sent) { Session.Toast($"{record.Name} moved in the walkthrough only (not connected to Revit)"); }

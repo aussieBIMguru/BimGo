@@ -12,18 +12,24 @@ namespace BimGo.Rendering
         /// <summary>
         /// Scene vertex shader. aEmissive (location 3) is the per-vertex glow (RGB colour, A = strength / 4); models
         /// without glowing surfaces leave the attribute disabled, so it reads (0, 0, 0, 1) = no glow.
+        /// aMaterial (4, the Realistic-mode material index; 65535 = none) and aUv (5, surface coordinates in metres)
+        /// are only enabled for snapshots with materials; the fragment shader only reads them when uRealistic = 1.
         /// </summary>
         public const string SCENE_VS = @"#version 330 core
 layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec3 aNormal;
 layout(location = 2) in vec4 aColor;
 layout(location = 3) in vec4 aEmissive;
+layout(location = 4) in float aMaterial;
+layout(location = 5) in vec2 aUv;
 uniform mat4 uViewProj;
 uniform mat4 uModel;
 out vec3 vWorld;
 out vec3 vNormal;
 out vec4 vColor;
 out vec3 vEmissive;
+flat out int vMaterial;
+out vec2 vUv;
 void main()
 {
     vec4 world = uModel * vec4(aPos, 1.0);
@@ -31,8 +37,254 @@ void main()
     vNormal = mat3(uModel) * aNormal;
     vColor = aColor;
     vEmissive = aEmissive.rgb * (aEmissive.a * 4.0);
+    vMaterial = int(aMaterial + 0.5);
+    vUv = aUv;
     gl_Position = uViewProj * world;
 }";
+
+        /// <summary>
+        /// Realistic colour mode (inserted after LIGHTS_GLSL in the scene fragment shader). The material table holds
+        /// six texels per material (MaterialTextures): t0 (colour, fade) t1 (image tint, glass reflectivity) t2 (scale U,
+        /// scale V, offset U, offset V) t3 (cos angle, sin angle, bucket or -1, layer) t4 (appearance tint, flags;
+        /// 1 = invert the image, 2 = a proxy whose image tint always multiplies) t5 (shine, roughness, flags: 1 = metal,
+        /// 2 = water; ripple strength).
+        /// <para>Reflections (reflection probes round, build A, sky only): shine is rounded to the nearest 25 % tier and
+        /// reflects when the tier reaches uReflectThreshold (water always). Each tier is drawn at a fixed head-on
+        /// strength (metals 0.30 / 0.55 / 0.90, other surfaces half that, Fresnel adds the rest at grazing angles);
+        /// roughness blurs the sky towards its average and takes away most of the grazing boost. Glass: Revit's
+        /// value × 2.5, kept within 10–50 %. uReflectGain is the user's strength slider. Water tilts the normal with six
+        /// travelling waves (uTime), faded with distance, and adds a sun glint (no shadow test).</para>
+        /// <para>Probes (build B): where the plan grid (uProbeGrid) names a baked probe, the reflection reads it instead
+        /// of the sky: box-projected against the probe's room box, the mip level from roughness, two probes blended near
+        /// room boundaries. Faces use the light-shadow face table (FACE_F / FACE_U / LIGHT_PAD from LIGHTS_GLSL, which
+        /// comes first). uReflectDebug 2 colours each probe's cells.</para> Images live in one array per size bucket; the gradients are taken from the
+        /// metric coordinates before any branching (textureGrad), so mip selection stays correct inside the
+        /// per-material branches. Keep the four buckets in step with MaterialTextures.BUCKETS.
+        /// <para>Order per fragment: image → invert → image tint → fade over the colour → appearance tint over the
+        /// result, all in linear light as Revit's renderer does (checked on Gavin's tint test model: a 50 % fade and an
+        /// inverted image only match Revit's Realistic view when blended linearly). The result goes back to the
+        /// display-referred values the rest of the lighting expects. Proxies are coloured before linearising (their
+        /// tint is worked out in display values). uTintMode: 0 = Revit tint off, otherwise multiply (Revit's blend,
+        /// confirmed on the same model).</para>
+        /// </summary>
+        public const string MATERIALS_GLSL = @"
+uniform int uRealistic;
+uniform sampler2D uMaterialTable;
+uniform sampler2DArray uTex0;
+uniform sampler2DArray uTex1;
+uniform sampler2DArray uTex2;
+uniform sampler2DArray uTex3;
+uniform int uReflections;
+uniform vec3 uSkyZenith;
+uniform vec3 uSkyHorizon;
+uniform int uTintMode;
+uniform float uReflectThreshold;
+uniform float uReflectGain;
+uniform int uReflectDebug;
+uniform float uTime;
+uniform int uProbesOn;
+uniform sampler2DArray uProbeArray;
+uniform sampler2DArray uProbeGrid;
+uniform sampler2D uProbeData;
+uniform vec3 uProbeGridOrigin;
+uniform vec3 uProbeGridCell;
+uniform vec3 uProbeGridSize;
+uniform float uProbeMaxLod;
+
+// Revit works in linear light: display values (sRGB, approximated by gamma 2.2) in, linear blending, display out
+vec3 toLinear(vec3 c) { return pow(max(c, vec3(0.0)), vec3(2.2)); }
+vec3 toDisplay(vec3 c) { return pow(clamp(c, 0.0, 1.0), vec3(1.0 / 2.2)); }
+
+// Revit tint (a multiply in linear light), or none when switched off
+vec3 applyTint(vec3 c, vec3 tint)
+{
+    return uTintMode == 0 ? c : c * toLinear(tint);
+}
+
+vec3 materialTexture(int bucket, vec3 uvl, vec2 gx, vec2 gy)
+{
+    if (bucket == 0) return textureGrad(uTex0, uvl, gx, gy).rgb;
+    if (bucket == 1) return textureGrad(uTex1, uvl, gx, gy).rgb;
+    if (bucket == 2) return textureGrad(uTex2, uvl, gx, gy).rgb;
+    return textureGrad(uTex3, uvl, gx, gy).rgb;
+}
+
+// Realistic base colour (rgb) and head-on reflectivity (a) of a material at a metric surface coordinate
+vec4 realisticColour(int id, vec2 uv, vec2 dx, vec2 dy)
+{
+    vec4 t0 = texelFetch(uMaterialTable, ivec2(0, id), 0);
+    vec4 t1 = texelFetch(uMaterialTable, ivec2(1, id), 0);
+    vec4 t3 = texelFetch(uMaterialTable, ivec2(3, id), 0);
+    vec4 t4 = texelFetch(uMaterialTable, ivec2(4, id), 0);
+    vec3 colour = toLinear(t0.rgb);
+    if (t3.z >= 0.0)
+    {
+        vec4 t2 = texelFetch(uMaterialTable, ivec2(2, id), 0);
+        mat2 turn = mat2(t3.x, t3.y, -t3.y, t3.x);
+        // Image rows run top-down, V runs up the surface: flip V so images stand upright
+        vec2 inv = vec2(1.0, -1.0) / t2.xy;
+        vec2 st = (turn * (uv - t2.zw)) * inv;
+        vec3 image = materialTexture(int(t3.z + 0.5), vec3(st, t3.w), (turn * dx) * inv, (turn * dy) * inv);
+        bool proxy = mod(floor(t4.a * 0.5), 2.0) >= 1.0;
+        if (proxy)
+        {
+            image = toLinear(clamp(image * t1.rgb, 0.0, 1.0)); // the material-colour match, always applied
+        }
+        else
+        {
+            image = toLinear(image);
+            if (mod(t4.a, 2.0) >= 1.0) image = vec3(1.0) - image;
+            image = applyTint(image, t1.rgb);
+        }
+        colour = mix(colour, clamp(image, 0.0, 1.0), t0.a);
+    }
+    colour = applyTint(colour, t4.rgb);
+    return vec4(toDisplay(colour), t1.a);
+}
+
+vec3 skyColour(vec3 dir)
+{
+    float h = dir.z;
+    return h >= 0.0 ? mix(uSkyHorizon, uSkyZenith, pow(clamp(h, 0.0, 1.0), 0.55)) : uSkyHorizon * 0.55;
+}
+
+// t5: shine (0-1), roughness (0-1), flags (1 = metal, 2 = water), ripple strength
+vec4 reflectionInfo(int id)
+{
+    return texelFetch(uMaterialTable, ivec2(5, id), 0);
+}
+
+// Shine rounded to the nearest quarter: 0, 1 (25 %), 2 (50 %), 3 (75 % +)
+int reflectionTier(float shine)
+{
+    return int(clamp(floor(shine * 4.0 + 0.5), 0.0, 3.0));
+}
+
+// Head-on strength drawn per tier (metals; other surfaces get half, Fresnel adds the rest at grazing angles)
+float tierStrength(int tier)
+{
+    return tier == 3 ? 0.90 : tier == 2 ? 0.55 : tier == 1 ? 0.30 : 0.0;
+}
+
+// The sky in a direction, blurred towards its average by roughness (stands in for a blurred probe until build B)
+vec3 blurredSky(vec3 dir, float rough)
+{
+    vec3 average = mix(uSkyHorizon, uSkyZenith, 0.35);
+    return mix(skyColour(dir), average, clamp(rough * 1.25, 0.0, 1.0));
+}
+
+// Water ripples: the slope of six travelling waves over the plan (metres, seconds), faded with distance so far
+// water doesn't shimmer; tilts an up-facing normal
+const vec2 WAVE_DIR[6] = vec2[6](vec2(0.951, 0.309), vec2(-0.588, 0.809), vec2(0.208, -0.978), vec2(-0.866, -0.500), vec2(0.743, 0.669), vec2(-0.105, 0.995));
+const float WAVE_K[6] = float[6](1.05, 1.65, 2.6, 3.95, 5.85, 8.65);
+const float WAVE_SPEED[6] = float[6](0.9, 1.3, 1.7, 2.2, 2.9, 3.6);
+const float WAVE_AMP[6] = float[6](1.0, 0.7, 0.5, 0.35, 0.25, 0.18);
+vec3 waterNormal(vec3 world, vec3 n, float amount, float dist)
+{
+    vec2 slope = vec2(0.0);
+    for (int i = 0; i < 6; i++)
+    {
+        float phase = dot(WAVE_DIR[i], world.xy) * WAVE_K[i] + uTime * WAVE_SPEED[i];
+        slope += WAVE_DIR[i] * (WAVE_AMP[i] * WAVE_K[i] * cos(phase));
+    }
+    slope *= amount * 0.2 / (1.0 + dist * 0.06);
+    return normalize(n + vec3(-slope, 0.0));
+}
+
+// The probes at a point: x = first probe (-1 = none: the sky), y = second (-1 none), z = the second's weight
+vec3 probeCell(vec3 world)
+{
+    if (uProbesOn == 0) return vec3(-1.0, -1.0, 0.0);
+    vec3 c = floor((world - uProbeGridOrigin) / uProbeGridCell);
+    if (any(lessThan(c, vec3(0.0))) || any(greaterThanEqual(c, uProbeGridSize))) return vec3(-1.0, -1.0, 0.0);
+    vec4 t = texelFetch(uProbeGrid, ivec3(c), 0);
+    return vec3(floor(t.r * 255.0 + 0.5) - 1.0, floor(t.g * 255.0 + 0.5) - 1.0, t.b);
+}
+
+// One probe's view along a reflection, box-projected against its room box when the point is inside it (so a
+// floor reflects the walls where they are, not as if infinitely far); ok = false while the probe isn't baked.
+// near (0-1): how far the box-projected hit is from the point; close hits (the floor at the foot of glass) stretch a
+// tiny patch of the capture and smear whatever stood between the probe and that floor, so they're kept at least
+// PROBE_MIN_HIT away and the caller fades them.
+const float PROBE_MIN_HIT = 0.75;
+vec3 probeSample(int i, vec3 world, vec3 dir, float lod, out bool ok, out float near)
+{
+    near = 1.0;
+    vec4 a = texelFetch(uProbeData, ivec2(0, i), 0);
+    vec4 lo = texelFetch(uProbeData, ivec2(1, i), 0);
+    vec4 hi = texelFetch(uProbeData, ivec2(2, i), 0);
+    ok = lo.w > 0.5;
+    if (!ok) return vec3(0.0);
+    vec3 v = dir;
+    if (all(greaterThanEqual(world, lo.xyz - 0.05)) && all(lessThanEqual(world, hi.xyz + 0.05)))
+    {
+        vec3 safe = vec3(abs(dir.x) < 1e-5 ? 1e-5 : dir.x, abs(dir.y) < 1e-5 ? 1e-5 : dir.y, abs(dir.z) < 1e-5 ? 1e-5 : dir.z);
+        vec3 tFar = max((hi.xyz - world) / safe, (lo.xyz - world) / safe);
+        float t = max(min(min(tFar.x, tFar.y), tFar.z), 0.0);
+        near = smoothstep(0.15, 1.5, t);
+        t = max(t, PROBE_MIN_HIT);
+        v = world + dir * t - a.xyz;
+        if (dot(v, v) < 1e-6) v = dir;
+    }
+    vec3 m = abs(v);
+    int face = (m.x >= m.y && m.x >= m.z) ? (v.x > 0.0 ? 0 : 1) : (m.y >= m.z ? (v.y > 0.0 ? 2 : 3) : (v.z > 0.0 ? 4 : 5));
+    vec3 F = FACE_F[face];
+    vec3 U = FACE_U[face];
+    vec3 R = cross(F, U);
+    float zf = max(dot(v, F), 1e-4);
+    vec2 uv = vec2(dot(v, R), dot(v, U)) / (zf * LIGHT_PAD) * 0.5 + 0.5;
+    return textureLod(uProbeArray, vec3(uv, a.w + float(face)), lod).rgb;
+}
+
+// The reflected environment from the probes (blended near room boundaries); have = false where there is none yet;
+// weight (0.4-1) fades reflections of very close hits (see probeSample). Smooth surfaces read at least half a mip
+// level down: a capture is magnified on big glass and mirrors, and the slight softening hides its texels.
+vec3 probeEnvironment(vec3 world, vec3 dir, float rough, out bool have, out float weight)
+{
+    have = false;
+    weight = 1.0;
+    vec3 cell = probeCell(world);
+    if (cell.x < 0.0) return vec3(0.0);
+    float lod = max(clamp(rough, 0.0, 1.0) * uProbeMaxLod, 0.5);
+    bool okA, okB;
+    float nearA, nearB;
+    vec3 env = probeSample(int(cell.x), world, dir, lod, okA, nearA);
+    float near = nearA;
+    if (cell.y >= 0.0 && cell.z > 0.0)
+    {
+        vec3 other = probeSample(int(cell.y), world, dir, lod, okB, nearB);
+        if (okA && okB) { env = mix(env, other, cell.z); near = mix(nearA, nearB, cell.z); }
+        else if (okB) { env = other; okA = true; near = nearB; }
+    }
+    have = okA;
+    weight = mix(0.4, 1.0, near);
+    return env;
+}
+
+// Debug colours (probe cells): one hue per probe, blended like the reflections; grey where there is none
+vec3 probeDebugColour(vec3 world)
+{
+    vec3 cell = probeCell(world);
+    if (cell.x < 0.0) return vec3(0.45);
+    vec3 a = 0.5 + 0.45 * cos(6.2832 * (cell.x * 0.618 + vec3(0.0, 0.33, 0.67)));
+    if (cell.y < 0.0) return a;
+    vec3 b = 0.5 + 0.45 * cos(6.2832 * (cell.y * 0.618 + vec3(0.0, 0.33, 0.67)));
+    return mix(a, b, cell.z);
+}
+
+// Debug colours: glass cyan, water blue, 75 % + red, 50 % orange, 25 % yellow, none grey
+vec3 reflectionDebugColour(vec4 info, float glass)
+{
+    if (glass > 0.0) return vec3(0.35, 0.85, 1.0);
+    int flags = int(info.z + 0.5);
+    if ((flags & 2) != 0) return vec3(0.10, 0.35, 1.0);
+    int tier = reflectionTier(info.x);
+    if (tier == 3) return vec3(0.95, 0.15, 0.15);
+    if (tier == 2) return vec3(1.0, 0.55, 0.10);
+    if (tier == 1) return vec3(0.95, 0.90, 0.25);
+    return vec3(0.55);
+}
+";
 
         /// <summary>
         /// Sun lighting and cascaded shadow lookup, shared by the scene and ground fragment shaders (inserted after
@@ -238,11 +490,13 @@ vec3 shoulder(vec3 c)
 }
 ";
 
-        public const string SCENE_FS = "#version 330 core\n" + SUN_GLSL + AO_GLSL + LIGHTS_GLSL + @"
+        public const string SCENE_FS = "#version 330 core\n" + SUN_GLSL + AO_GLSL + LIGHTS_GLSL + MATERIALS_GLSL + @"
 in vec3 vWorld;
 in vec3 vNormal;
 in vec4 vColor;
 in vec3 vEmissive;
+flat in int vMaterial;
+in vec2 vUv;
 uniform vec3 uEye;
 uniform vec3 uLightDir;
 uniform vec3 uFogColor;
@@ -254,9 +508,23 @@ uniform vec4 uOverride;
 out vec4 oColor;
 void main()
 {
+    // Texture gradients first: derivatives are only defined outside the per-material branches
+    vec2 uvDx = dFdx(vUv);
+    vec2 uvDy = dFdy(vUv);
     if (vWorld.z < uClipZ.x || vWorld.z > uClipZ.y) discard;
 
     vec4 base = vColor;
+    float reflectivity = 0.0;
+    vec4 shine = vec4(0.0, 1.0, 0.0, 0.0);
+    if (uRealistic == 1 && uWhitecard == 0 && vMaterial >= 0 && vMaterial < 65535)
+    {
+        vec4 r = realisticColour(vMaterial, vUv, uvDx, uvDy);
+        base.rgb = r.rgb;
+        reflectivity = r.a;
+        shine = reflectionInfo(vMaterial);
+        if (uReflectDebug == 1) base.rgb = reflectionDebugColour(shine, reflectivity);
+        else if (uReflectDebug == 2) base.rgb = probeDebugColour(vWorld);
+    }
     if (uWhitecard == 1)
     {
         float l = dot(base.rgb, vec3(0.299, 0.587, 0.114));
@@ -275,6 +543,10 @@ void main()
     }
 
     if (!gl_FrontFacing) n = -n;
+    int shineFlags = int(shine.z + 0.5);
+    float dist = length(vWorld - uEye);
+    bool reflecting = uRealistic == 1 && uReflections == 1 && uReflectDebug == 0;
+    if (reflecting && (shineFlags & 2) != 0 && n.z > 0.3) n = waterNormal(vWorld, n, shine.w, dist);
     float ao = ambientOcclusion(vWorld, uEye);
     vec3 lit;
     if (uSun == 1)
@@ -290,11 +562,62 @@ void main()
     if (uLightCount > 0) { lit += base.rgb * artificialLight(vWorld, n, ao); }
     lit += vEmissive * uEmissive;
 
-    float d = length(vWorld - uEye);
-    float fog = clamp(1.0 - exp(-d * uFogDensity), 0.0, 0.65);
+    // Reflections (Realistic mode, sky only until probes): Schlick's Fresnel, stronger at grazing angles
+    float alpha = base.a;
+    if (reflecting && (reflectivity > 0.0 || shine.x > 0.0))
+    {
+        vec3 view = normalize(vWorld - uEye);
+        float cosine = clamp(dot(-view, n), 0.0, 1.0);
+        float grazing = pow(1.0 - cosine, 5.0);
+        vec3 dir = reflect(view, n);
+        float fresnel = 0.0;
+        if (reflectivity > 0.0)
+        {
+            // Glass: Revit's head-on value lifted so the sheen reads (2.5x, 10-50 %); the room's probe inside
+            float r0 = clamp(reflectivity * 2.5, 0.10, 0.5) * uReflectGain;
+            fresnel = min((r0 + (1.0 - r0) * grazing) * 0.85, 0.95);
+            bool have;
+            float weight;
+            vec3 env = probeEnvironment(vWorld, dir, 0.0, have, weight);
+            if (have) fresnel *= weight;
+            lit = mix(lit, have ? env : skyColour(dir), fresnel);
+        }
+        else
+        {
+            int tier = reflectionTier(shine.x);
+            bool water = (shineFlags & 2) != 0;
+            if (tier > 0 && (water || float(tier) * 0.25 >= uReflectThreshold - 0.01))
+            {
+                bool metal = (shineFlags & 1) != 0;
+                float rough = clamp(shine.y, 0.0, 1.0);
+                float r0 = tierStrength(tier) * (metal ? 1.0 : 0.5) * uReflectGain;
+                // Rough surfaces lose most of the grazing-angle boost
+                fresnel = min(r0 + (1.0 - r0) * grazing * (1.0 - rough) * 0.8, 0.95);
+                // The probes where baked; else the sky, toned down where AO says the surface is enclosed
+                bool have;
+                float weight;
+                vec3 env = probeEnvironment(vWorld, dir, rough, have, weight);
+                if (!have) env = blurredSky(dir, rough) * mix(0.55, 1.0, ao);
+                else fresnel *= weight;
+                // Metals: the reflection takes the metal's colour (kept fairly bright: chrome is near white)
+                if (metal) env *= mix(base.rgb, vec3(1.0), 0.5);
+                lit = mix(lit, env, fresnel);
+                // Water: the sun glints on the ripples (water is usually outdoors, so no shadow lookup)
+                if (water)
+                {
+                    vec3 sunDir = uSun == 1 ? uSunDir : normalize(uLightDir);
+                    vec3 sunCol = uSun == 1 ? uSunColor : vec3(0.8);
+                    lit += sunCol * (pow(max(dot(dir, sunDir), 0.0), 180.0) * 1.5);
+                }
+            }
+        }
+        alpha = alpha + (1.0 - alpha) * fresnel;
+    }
+
+    float fog = clamp(1.0 - exp(-dist * uFogDensity), 0.0, 0.65);
     lit = shoulder(mix(lit, uFogColor, fog));
 
-    vec4 result = vec4(lit, base.a);
+    vec4 result = vec4(lit, alpha);
     if (uOverride.a > 0.0)
     {
         result.rgb = mix(result.rgb, uOverride.rgb, uOverride.a);

@@ -81,6 +81,7 @@ namespace BimGo.Format
                 string temp = path + ".tmp";
                 File.WriteAllText(temp, JsonSerializer.Serialize(document, OPTIONS));
                 File.Move(temp, path, overwrite: true);
+                ModelFolders.MirrorAfterWrite(path);
                 return true;
             }
             catch (Exception ex)

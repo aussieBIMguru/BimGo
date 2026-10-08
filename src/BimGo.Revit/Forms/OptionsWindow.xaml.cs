@@ -8,7 +8,9 @@ using Wpf = System.Windows.Controls;
 namespace BimGo.Forms
 {
     /// <summary>
-    /// The modal launch-options dialog (WPF). Edits a <see cref="LaunchSettings"/> in place.
+    /// The modal launch-options dialog (WPF), in seven tabs (Load · Categories · Geometry · Materials · Links · Parameters
+    /// · Player; the last one used is remembered) with the start position and the Launch button always visible. Edits a
+    /// <see cref="LaunchSettings"/> in place.
     ///
     /// Note: the project enables both WPF and WinForms, so WinForms types are in the global usings.
     /// WPF types are referenced through the Wpf/Win/Media aliases to avoid ambiguous names
@@ -48,6 +50,14 @@ namespace BimGo.Forms
         private readonly ViewChoice _view;
         private readonly Dictionary<string, Wpf.CheckBox> _linkChecks = new(StringComparer.Ordinal);
 
+        // Materials: the texture review (null where the caller offers none, e.g. no Revit document)
+        private readonly TextureReviewServices _textureServices;
+
+        // Quality profile: a working copy of the settings a profile governs. The visible controls (colour, anti-aliasing,
+        // shadow quality, lights) are read into it; the walkthrough-only values a profile sets (AO, bloom, reflections)
+        // live only here and are written back on Launch.
+        private LaunchSettings _display;
+
         #endregion
 
         /// <summary>
@@ -61,15 +71,19 @@ namespace BimGo.Forms
         /// <param name="phases">The model's phases and their defaults.</param>
         /// <param name="links">The model's link instances and the key the choice is saved under.</param>
         /// <param name="view">The active view (name and how many elements it shows).</param>
+        /// <param name="textureServices">The "Review textures…" callbacks, or null to hide the button.</param>
         internal OptionsWindow(LaunchSettings settings, string spawnDescription, int[] counts,
-            Func<List<string>> scanParameterNames, string primaryButtonText, PhaseChoices phases, LinkChoices links, ViewChoice view)
+            Func<List<string>> scanParameterNames, string primaryButtonText, PhaseChoices phases, LinkChoices links, ViewChoice view,
+            TextureReviewServices textureServices = null)
         {
+            _textureServices = textureServices;
             _settings = settings;
             _counts = counts;
             _scanParameterNames = scanParameterNames;
             _phases = phases ?? new PhaseChoices();
             _links = links ?? new LinkChoices();
             _view = view ?? new ViewChoice();
+            _display = settings.Clone();
 
             InitializeComponent();
             Title = $"BimGo {Globals.ADDIN_VERSION} — Options";
@@ -177,6 +191,8 @@ namespace BimGo.Forms
             RadioSkip.IsChecked = _settings.OverLimit == OverLimitMode.Skip;
             RadioWhitecard.IsChecked = _settings.Colour == ColourMode.Whitecard;
             RadioMaterial.IsChecked = _settings.Colour == ColourMode.Material;
+            RadioRealistic.IsChecked = _settings.Colour == ColourMode.Realistic;
+            LoadTextures();
             TextStep.Text = _settings.MaxStepHeightMm.ToString("0", CultureInfo.InvariantCulture);
 
             ComboMsaa.SelectedIndex = _settings.Msaa >= 4 ? 2 : _settings.Msaa >= 2 ? 1 : 0;
@@ -193,6 +209,8 @@ namespace BimGo.Forms
             CheckSkipHelpers.IsChecked = _settings.SkipHelperGeometry;
             TextHelperKeywords.Text = string.Join(", ", _settings.HelperSubcategoryKeywords ?? LaunchSettings.DefaultHelperKeywords());
             LoadPhases();
+            CheckSidecarsBesideModel.IsChecked = _settings.SidecarsBesideModel;
+            Tabs.SelectedIndex = Math.Clamp(_settings.LastOptionsTab, 0, Tabs.Items.Count - 1);
 
             foreach (string name in _settings.ExtraParameters ?? new List<string>())
             {
@@ -205,6 +223,7 @@ namespace BimGo.Forms
             RefreshGroupChecks();
             UpdateSliderLabels();
             UpdateViewOnly();
+            RefreshProfile();
         }
 
         #endregion
@@ -250,18 +269,163 @@ namespace BimGo.Forms
         }
 
         /// <summary>
+        /// Materials and textures: the tick, the size cap and where textures will be found on this machine.
+        /// </summary>
+        private void LoadTextures()
+        {
+            CheckTextures.IsChecked = _settings.ExtractTextures;
+            CheckProxyTextures.IsChecked = _settings.ProxyMissingTextures;
+            ButtonReviewTextures.Visibility = _textureServices?.Review != null ? Win.Visibility.Visible : Win.Visibility.Collapsed;
+            UpdateOverrideSummary();
+            ComboTextureSize.Items.Clear();
+            foreach (int size in MaterialData.TEXTURE_SIZES) { ComboTextureSize.Items.Add($"{size} px"); }
+            ComboTextureSize.SelectedIndex = Math.Max(0, Array.IndexOf(MaterialData.TEXTURE_SIZES, MaterialData.NearestTextureSize(_settings.TextureMaxSize)));
+
+            LoadTextureSourcesText();
+            UpdateTextureControls();
+        }
+
+        /// <summary>
+        /// Where textures will be found on this machine (one line under the tick).
+        /// </summary>
+        private void LoadTextureSourcesText()
+        {
+            try
+            {
+                Extraction.TextureLocator locator = Extraction.TextureLocator.Discover(Globals.REVIT_VERSION_STR);
+                string library = locator.HasLibrary ? "Autodesk Material Library found" : "Autodesk Material Library not installed (library textures will be missing)";
+                string extra = locator.ExtraPaths.Count == 0
+                    ? "no additional render appearance paths set in Revit Options"
+                    : $"{locator.ExtraPaths.Count} additional render appearance path{(locator.ExtraPaths.Count == 1 ? "" : "s")}: {string.Join("; ", locator.ExtraPaths)}";
+                int search = _settings.TextureSearchFolders?.Count ?? 0;
+                string folders = search == 0 ? string.Empty : $"; {search} remembered texture search folder{(search == 1 ? "" : "s")}";
+                TextTextureSources.Text = $"{library}; {extra}{folders}.";
+            }
+            catch (Exception ex)
+            {
+                TextTextureSources.Text = "Texture folders could not be checked (see the log).";
+                Utilities.Log_Utils.Write($"Texture folder check failed: {ex.Message}");
+            }
+        }
+
+        private void UpdateTextureControls()
+        {
+            bool on = CheckTextures.IsChecked == true;
+            ComboTextureSize.IsEnabled = on;
+            CheckProxyTextures.IsEnabled = on;
+            ButtonReviewTextures.IsEnabled = on;
+        }
+
+        /// <summary>
+        /// "n materials with your texture choice" for this model (from its override file).
+        /// </summary>
+        private void UpdateOverrideSummary()
+        {
+            try
+            {
+                TextureOverrideSet overrides = TextureOverrideSet.LoadFromModelFolder(_links.ModelFolder, _links.HostKey);
+                int count = overrides.Documents.Values.Sum(d => d.Count);
+                TextTextureOverrides.Text = count == 0 ? string.Empty : $"{count} material{(count == 1 ? "" : "s")} with your texture choice in this model";
+            }
+            catch (Exception ex)
+            {
+                TextTextureOverrides.Text = string.Empty;
+                Utilities.Log_Utils.Write($"Texture overrides unreadable: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Runs the texture review with the choices as they stand in this window (categories, active view, links,
+        /// phases), then opens the review window.
+        /// </summary>
+        private void ButtonReviewTextures_Click(object sender, Win.RoutedEventArgs e)
+        {
+            if (_textureServices?.Review == null) { return; }
+            if (!ReadPhases(out string existingPhase, out string newPhase)) { return; }
+
+            LaunchSettings trial = _settings.Clone();
+            List<string> enabled = SelectedKeys();
+            bool viewOnly = CheckViewOnly.IsChecked == true;
+            if (enabled.Count == 0 && !viewOnly)
+            {
+                Win.MessageBox.Show(this, "Tick at least one category to load (or load only what the active view shows).", "BimGo", Win.MessageBoxButton.OK, Win.MessageBoxImage.Warning);
+                return;
+            }
+            if (enabled.Count > 0) { trial.EnabledCategories = enabled; }
+            trial.ActiveViewOnly = viewOnly;
+            trial.ExistingPhase = existingPhase;
+            trial.NewPhase = newPhase;
+            trial.ExtractTextures = true;
+            trial.ProxyMissingTextures = CheckProxyTextures.IsChecked == true;
+            trial.SetLinksFor(_links.HostKey, SelectedLinks());
+
+            Extraction.TextureReview review;
+            try
+            {
+                var progress = new Utilities.OperationProgress();
+                using (ProgressWindow.Show("Reviewing textures", progress, _textureServices.Owner))
+                {
+                    review = _textureServices.Review(trial, progress);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                Utilities.Log_Utils.Write($"Texture review failed: {ex}");
+                Win.MessageBox.Show(this, $"The texture review failed:\n{ex.Message}", "BimGo", Win.MessageBoxButton.OK, Win.MessageBoxImage.Warning);
+                return;
+            }
+
+            if (review.Rows.Count == 0)
+            {
+                Win.MessageBox.Show(this, "None of the elements this Go would load carry a material.", "BimGo", Win.MessageBoxButton.OK, Win.MessageBoxImage.Information);
+                return;
+            }
+
+            var window = new TextureReviewWindow(review, _textureServices, _settings) { Owner = this };
+            window.ShowDialog();
+            UpdateOverrideSummary();
+            LoadTextureSourcesText();
+        }
+
+        /// <summary>
+        /// Realistic colours need textures: ticking it ticks the extraction.
+        /// </summary>
+        private void RadioRealistic_Click(object sender, Win.RoutedEventArgs e)
+        {
+            if (RadioRealistic.IsChecked == true) { CheckTextures.IsChecked = true; }
+            UpdateTextureControls();
+            RefreshProfile();
+        }
+
+        /// <summary>
+        /// Without textures the Realistic mode has nothing to show: unticking falls back to material colours.
+        /// </summary>
+        private void CheckTextures_Click(object sender, Win.RoutedEventArgs e)
+        {
+            if (CheckTextures.IsChecked != true && RadioRealistic.IsChecked == true) { RadioMaterial.IsChecked = true; }
+            UpdateTextureControls();
+            RefreshProfile();
+        }
+
+        /// <summary>
         /// Validates and writes the settings back, then closes.
         /// </summary>
         private void ButtonLaunch_Click(object sender, Win.RoutedEventArgs e)
         {
             if (!int.TryParse(TextThreshold.Text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int threshold) || threshold < 100)
             {
+                ShowTabOf(TextThreshold);
                 Win.MessageBox.Show(this, "The triangle limit must be a whole number of at least 100.", "BimGo", Win.MessageBoxButton.OK, Win.MessageBoxImage.Warning);
                 TextThreshold.Focus();
                 return;
             }
             if (!float.TryParse(TextStep.Text.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out float step) || step < 50f || step > 450f)
             {
+                ShowTabOf(TextStep);
                 Win.MessageBox.Show(this, "The max step height must be between 50 and 450 mm.", "BimGo", Win.MessageBoxButton.OK, Win.MessageBoxImage.Warning);
                 TextStep.Focus();
                 return;
@@ -273,6 +437,7 @@ namespace BimGo.Forms
             List<string> enabled = SelectedKeys();
             if (enabled.Count == 0 && !viewOnly)
             {
+                ShowTabOf(GridGroups);
                 Win.MessageBox.Show(this, "Tick at least one category to load (or load only what the active view shows).", "BimGo", Win.MessageBoxButton.OK, Win.MessageBoxImage.Warning);
                 return;
             }
@@ -287,7 +452,12 @@ namespace BimGo.Forms
                 .ToList();
             _settings.TriangleThreshold = threshold;
             _settings.OverLimit = RadioSkip.IsChecked == true ? OverLimitMode.Skip : OverLimitMode.Proxy;
-            _settings.Colour = RadioMaterial.IsChecked == true ? ColourMode.Material : ColourMode.Whitecard;
+            _settings.Colour = RadioRealistic.IsChecked == true ? ColourMode.Realistic
+                : RadioMaterial.IsChecked == true ? ColourMode.Material
+                : ColourMode.Whitecard;
+            _settings.ExtractTextures = CheckTextures.IsChecked == true;
+            _settings.ProxyMissingTextures = CheckProxyTextures.IsChecked == true;
+            _settings.TextureMaxSize = MaterialData.TEXTURE_SIZES[Math.Clamp(ComboTextureSize.SelectedIndex, 0, MaterialData.TEXTURE_SIZES.Length - 1)];
             _settings.MaxStepHeightMm = step;
             _settings.Msaa = ComboMsaa.SelectedIndex switch { 2 => 4, 1 => 2, _ => 0 };
             _settings.FieldOfView = (float)SliderFov.Value;
@@ -304,6 +474,17 @@ namespace BimGo.Forms
             _settings.NewPhase = newPhase;
             _settings.ExtraParameters = _knownParameters.Where(_pickedParameters.Contains).ToList();
             _settings.SetLinksFor(_links.HostKey, SelectedLinks());
+
+            // What a picked profile set for the walkthrough only (unchanged unless a profile was picked here)
+            _settings.AmbientOcclusion = _display.AmbientOcclusion;
+            _settings.BloomIntensity = _display.BloomIntensity;
+            _settings.Reflections = _display.Reflections;
+            _settings.ReflectionThreshold = _display.ReflectionThreshold;
+            _settings.ReflectionProbes = _display.ReflectionProbes;
+            _settings.ProbeResolution = _display.ProbeResolution;
+
+            _settings.SidecarsBesideModel = CheckSidecarsBesideModel.IsChecked == true;
+            _settings.LastOptionsTab = Math.Max(Tabs.SelectedIndex, 0);
             _settings.Sanitise();
 
             DialogResult = true;
@@ -372,6 +553,105 @@ namespace BimGo.Forms
         private void ButtonCancel_Click(object sender, Win.RoutedEventArgs e)
         {
             DialogResult = false;
+        }
+
+        #endregion
+
+        #region Quality profile and tabs
+
+        /// <summary>
+        /// Writes the visible profile-governed controls (colour, anti-aliasing, shadow quality, lights) into a settings object.
+        /// </summary>
+        private void ReadDisplayControls(LaunchSettings target)
+        {
+            target.Colour = RadioRealistic.IsChecked == true ? ColourMode.Realistic
+                : RadioMaterial.IsChecked == true ? ColourMode.Material
+                : ColourMode.Whitecard;
+            target.Msaa = ComboMsaa.SelectedIndex switch { 2 => 4, 1 => 2, _ => 0 };
+            target.ShadowQuality = (BimGo.Scene.ShadowQuality)Math.Clamp(ComboShadowQuality.SelectedIndex, 0, 2);
+            target.ArtificialLights = (BimGo.Scene.ArtificialLightMode)Math.Clamp(ComboArtificialLights.SelectedIndex, 0, 2);
+        }
+
+        /// <summary>
+        /// Shows the profile the current choices match (Custom when none) and what it means.
+        /// </summary>
+        private void RefreshProfile()
+        {
+            if (_display == null || ComboProfile == null || TextProfile == null || ComboArtificialLights == null || RadioRealistic == null) { return; }
+            ReadDisplayControls(_display);
+            QualityProfile profile = QualityProfiles.Detect(_display);
+
+            bool wasUpdating = _updating;
+            _updating = true;
+            ComboProfile.SelectedIndex = (int)profile;
+            _updating = wasUpdating;
+
+            TextProfile.Text = profile switch
+            {
+                QualityProfile.Basic => "Basic: whitecard, 2x anti-aliasing, ambient occlusion and low shadow quality; artificial lights, bloom and reflections off.",
+                QualityProfile.Medium => "Medium: material colours, 2x anti-aliasing, ambient occlusion, medium shadows, glow + light, bloom, sky reflections on the shiniest surfaces.",
+                QualityProfile.Realistic => "Realistic: textures (extraction ticked), 4x anti-aliasing, ambient occlusion, high shadows, glow + light, bloom, probe reflections on all reflective surfaces.",
+                _ => "Custom: your own mix. A profile sets the colour mode, anti-aliasing, shadow quality and lights here, and ambient occlusion, bloom and reflections in the walkthrough. Shadows on / off stays with each model (O)."
+            };
+        }
+
+        /// <summary>
+        /// A profile was picked: sets the controls it governs (and, for Realistic, ticks the extraction).
+        /// </summary>
+        private void ComboProfile_SelectionChanged(object sender, Wpf.SelectionChangedEventArgs e)
+        {
+            if (_updating || _display == null) { return; }
+            var profile = (QualityProfile)Math.Clamp(ComboProfile.SelectedIndex, 0, 3);
+            if (profile == QualityProfile.Custom)
+            {
+                RefreshProfile(); // Custom is shown, not picked
+                return;
+            }
+
+            ReadDisplayControls(_display);
+            QualityProfiles.Apply(_display, profile);
+
+            _updating = true;
+            RadioWhitecard.IsChecked = _display.Colour == ColourMode.Whitecard;
+            RadioMaterial.IsChecked = _display.Colour == ColourMode.Material;
+            RadioRealistic.IsChecked = _display.Colour == ColourMode.Realistic;
+            ComboMsaa.SelectedIndex = _display.Msaa >= 4 ? 2 : _display.Msaa >= 2 ? 1 : 0;
+            ComboShadowQuality.SelectedIndex = Math.Clamp((int)_display.ShadowQuality, 0, 2);
+            ComboArtificialLights.SelectedIndex = Math.Clamp((int)_display.ArtificialLights, 0, 2);
+            if (profile == QualityProfile.Realistic) { CheckTextures.IsChecked = true; }
+            _updating = false;
+
+            UpdateTextureControls();
+            RefreshProfile();
+        }
+
+        /// <summary>
+        /// A colour radio changed (Whitecard / Material; Realistic has its own handler).
+        /// </summary>
+        private void DisplayControl_Changed(object sender, Win.RoutedEventArgs e)
+        {
+            if (!_updating) { RefreshProfile(); }
+        }
+
+        /// <summary>
+        /// Anti-aliasing, shadow quality or lights changed (fires during InitializeComponent too, hence the guard).
+        /// </summary>
+        private void DisplayCombo_Changed(object sender, Wpf.SelectionChangedEventArgs e)
+        {
+            if (!_updating) { RefreshProfile(); }
+        }
+
+        /// <summary>
+        /// Selects the tab holding a control (before a validation message focuses it).
+        /// </summary>
+        private void ShowTabOf(Win.DependencyObject control)
+        {
+            Win.DependencyObject node = control;
+            while (node != null && node is not Wpf.TabItem)
+            {
+                node = Win.LogicalTreeHelper.GetParent(node);
+            }
+            if (node is Wpf.TabItem tab) { tab.IsSelected = true; }
         }
 
         #endregion
@@ -458,12 +738,14 @@ namespace BimGo.Forms
             int existingIndex = chosenExisting == null ? -1 : _phases.Names.IndexOf(chosenExisting);
             if (chosenExisting == null && newIndex > 0)
             {
+                ShowTabOf(ComboExistingPhase);
                 Win.MessageBox.Show(this, "Pick the existing phase (usually the phase before the new one).", "BimGo", Win.MessageBoxButton.OK, Win.MessageBoxImage.Warning);
                 ComboExistingPhase.Focus();
                 return false;
             }
             if (chosenExisting != null && existingIndex >= newIndex)
             {
+                ShowTabOf(ComboExistingPhase);
                 Win.MessageBox.Show(this, "The existing phase must come before the new phase.", "BimGo", Win.MessageBoxButton.OK, Win.MessageBoxImage.Warning);
                 ComboExistingPhase.Focus();
                 return false;
@@ -764,6 +1046,9 @@ namespace BimGo.Forms
     {
         /// <summary>The host model key (<see cref="LaunchSettings.LinkedModels"/>).</summary>
         public string HostKey { get; init; } = string.Empty;
+
+        /// <summary>The host model's BimGo folder (its texture choices are summarised from there).</summary>
+        public string ModelFolder { get; init; } = string.Empty;
 
         /// <summary>The link instances, sorted by file then name.</summary>
         public List<LinkChoice> Items { get; init; } = new();

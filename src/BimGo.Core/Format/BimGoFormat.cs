@@ -22,6 +22,9 @@ namespace BimGo.Format
     /// sun.json          sun / shadow state: on/off, date, time, intensities (optional)
     /// visibility.json   hidden categories, links and elements (optional; only written when something is hidden)
     /// lighting.json     glowing vertex ranges and lighting-fixture lights (optional; only written when there are some)
+    /// materials.json    material table for Realistic mode (optional; only when textures were extracted)
+    /// material.bin      header + ushort material index per vertex + float2 surface coordinate (m) per vertex (optional)
+    /// textures/…        embedded texture images (JPEG / PNG), referenced from materials.json (optional)
     /// </code>
     /// </summary>
     public static class BimGoFormat
@@ -69,6 +72,17 @@ namespace BimGo.Format
         internal const string ENTRY_SUN = "sun.json";
         internal const string ENTRY_VISIBILITY = "visibility.json";
         internal const string ENTRY_LIGHTING = "lighting.json";
+        internal const string ENTRY_MATERIALS = "materials.json";
+        internal const string ENTRY_MATERIAL_STREAMS = "material.bin";
+
+        /// <summary>The folder (entry name prefix) embedded texture images live under.</summary>
+        public const string TEXTURE_FOLDER = "textures/";
+
+        /// <summary>material.bin magic ("BMAT", little-endian).</summary>
+        internal const uint MATERIAL_MAGIC = 0x54414D42;
+
+        /// <summary>material.bin layout version.</summary>
+        internal const int MATERIAL_VERSION = 1;
 
         /// <summary>geometry.bin magic ("BGEO", little-endian).</summary>
         internal const uint GEOMETRY_MAGIC = 0x4F454742;

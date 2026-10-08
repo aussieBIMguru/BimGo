@@ -76,12 +76,14 @@ namespace BimGo.Format
                 SunSettings sun = ReadJson<SunSettings>(zip, BimGoFormat.ENTRY_SUN, required: false)?.Clean();
                 VisibilitySettings visibility = ReadJson<VisibilitySettings>(zip, BimGoFormat.ENTRY_VISIBILITY, required: false)?.Clean();
                 LightingDto lighting = ReadJson<LightingDto>(zip, BimGoFormat.ENTRY_LIGHTING, required: false);
+                MaterialsDto materials = ReadOptionalJson<MaterialsDto>(zip, BimGoFormat.ENTRY_MATERIALS);
                 progress?.Step(0.1);
                 progress?.ThrowIfCancelled();
                 ReadGeometry(zip, out SceneVertex[] vertices, out uint[] indices, progress);
                 progress?.ThrowIfCancelled();
 
-                SceneData scene = BuildScene(path, manifest, model, elements, parameters, vertices, indices, settings ?? new LaunchSettings(), lighting);
+                MaterialData materialData = ReadMaterials(zip, materials, vertices.Length);
+                SceneData scene = BuildScene(path, manifest, model, elements, parameters, vertices, indices, settings ?? new LaunchSettings(), lighting, materialData);
                 comments.Comments ??= new List<CommentRecord>();
                 comments.Comments.RemoveAll(c => c == null || string.IsNullOrWhiteSpace(c.Text));
 
@@ -113,7 +115,7 @@ namespace BimGo.Format
         #region Scene
 
         private static SceneData BuildScene(string path, ManifestDto manifest, ModelDto model, ElementsDto elementsDto, ParametersDto parametersDto,
-            SceneVertex[] vertices, uint[] indices, LaunchSettings settings, LightingDto lightingDto)
+            SceneVertex[] vertices, uint[] indices, LaunchSettings settings, LightingDto lightingDto, MaterialData materials)
         {
             IReadOnlyList<CategoryDef> catalog = CategoryCatalog.All;
             int genericIndex = CategoryCatalog.Find(CategoryCatalog.KEY_GENERIC)?.Index ?? 0;
@@ -260,6 +262,7 @@ namespace BimGo.Format
                 Site = model.Site ?? new SiteInfo(),
                 Parameters = BuildParameters(parametersDto, records.Length),
                 Lighting = BuildLighting(lightingDto, vertices.Length, records.Length),
+                Materials = materials ?? MaterialData.Empty,
                 CategoryLoaded = loaded,
                 CategoryElementCounts = counts,
                 Settings = settings,
@@ -327,6 +330,105 @@ namespace BimGo.Format
                 : new LightingData { Emissive = runs.ToArray(), Lights = lights.ToArray() };
         }
 
+        /// <summary>
+        /// The optional material table, per-vertex streams and images, validated: the streams must match the vertex
+        /// count (else everything is dropped), indices past the table read as no material, and a texture whose image
+        /// entry is missing reads as missing. Never throws: materials are decoration, never worth a failed load.
+        /// </summary>
+        private static MaterialData ReadMaterials(ZipArchive zip, MaterialsDto dto, int vertexCount)
+        {
+            if (dto?.Materials == null || dto.Materials.Count == 0) { return MaterialData.Empty; }
+            try
+            {
+                SceneMaterial[] table = dto.Materials
+                    .Take(MaterialData.MAX_MATERIALS)
+                    .Select(m => (m ?? new SceneMaterial()).Clean())
+                    .ToArray();
+
+                ZipArchiveEntry entry = zip.GetEntry(BimGoFormat.ENTRY_MATERIAL_STREAMS);
+                if (entry == null) { return MaterialData.Empty; }
+                ushort[] indices;
+                Vector2[] uvs = Array.Empty<Vector2>();
+                using (Stream stream = entry.Open())
+                using (var header = new BinaryReader(stream, System.Text.Encoding.UTF8, leaveOpen: true))
+                {
+                    if (header.ReadUInt32() != BimGoFormat.MATERIAL_MAGIC) { throw new InvalidDataException("bad material.bin header"); }
+                    if (header.ReadInt32() > BimGoFormat.MATERIAL_VERSION) { throw new InvalidDataException("material.bin from a newer BimGo"); }
+                    int count = header.ReadInt32();
+                    int flags = header.ReadInt32();
+                    if (count != vertexCount) { throw new InvalidDataException($"material.bin has {count} vertices, the geometry {vertexCount}"); }
+
+                    indices = new ushort[count];
+                    stream.ReadExactly(MemoryMarshal.AsBytes(indices.AsSpan()));
+                    if ((flags & 1) != 0)
+                    {
+                        uvs = new Vector2[count];
+                        stream.ReadExactly(MemoryMarshal.AsBytes(uvs.AsSpan()));
+                        for (int i = 0; i < uvs.Length; i++)
+                        {
+                            if (!float.IsFinite(uvs[i].X) || !float.IsFinite(uvs[i].Y)) { uvs[i] = Vector2.Zero; }
+                        }
+                    }
+                }
+                for (int i = 0; i < indices.Length; i++)
+                {
+                    if (indices[i] >= table.Length) { indices[i] = MaterialData.NONE; }
+                }
+
+                // Images: only referenced entries under textures/, each read once
+                var textures = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+                foreach (SceneMaterial material in table)
+                {
+                    if (material.Texture == null) { continue; }
+                    if (!textures.ContainsKey(material.Texture))
+                    {
+                        byte[] bytes = material.Texture.StartsWith(BimGoFormat.TEXTURE_FOLDER, StringComparison.Ordinal)
+                            ? ReadBytes(zip, material.Texture)
+                            : null;
+                        if (bytes != null) { textures[material.Texture] = bytes; }
+                    }
+                    if (!textures.ContainsKey(material.Texture))
+                    {
+                        material.Texture = null;
+                        if (material.TextureState == TextureState.Embedded) { material.TextureState = TextureState.Missing; }
+                    }
+                }
+
+                return new MaterialData
+                {
+                    Materials = table,
+                    VertexMaterial = indices,
+                    VertexUv = uvs,
+                    Textures = textures,
+                    TextureMaxSize = MaterialData.NearestTextureSize(dto.TextureMaxSize)
+                };
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Utilities.Log_Utils.Write($"Materials ignored (damaged): {ex.Message}");
+                return MaterialData.Empty;
+            }
+        }
+
+        /// <summary>An entry's bytes (capped at 64 MB), or null if absent or unreadable.</summary>
+        private static byte[] ReadBytes(ZipArchive zip, string name)
+        {
+            try
+            {
+                ZipArchiveEntry entry = zip.GetEntry(name);
+                if (entry == null || entry.Length <= 0 || entry.Length > 64L * 1024 * 1024) { return null; }
+                byte[] bytes = new byte[entry.Length];
+                using Stream stream = entry.Open();
+                stream.ReadExactly(bytes);
+                return bytes;
+            }
+            catch (Exception ex)
+            {
+                Utilities.Log_Utils.Write($"Texture {name} unreadable: {ex.Message}");
+                return null;
+            }
+        }
+
         private static ParameterTable BuildParameters(ParametersDto dto, int elementCount)
         {
             if (dto?.Names == null || dto.Names.Length == 0) { return ParameterTable.Empty; }
@@ -385,6 +487,19 @@ namespace BimGo.Format
                     progress.Step(0.1 + 0.82 * (total <= 0 ? 1.0 : (double)done / total));
                     progress.ThrowIfCancelled();
                 }
+            }
+        }
+
+        /// <summary>
+        /// An optional entry that must never fail the load (damaged JSON reads as absent, and is logged).
+        /// </summary>
+        private static T ReadOptionalJson<T>(ZipArchive zip, string name) where T : class
+        {
+            try { return ReadJson<T>(zip, name, required: false); }
+            catch (Exception ex) when (ex is JsonException or InvalidDataException or IOException)
+            {
+                Utilities.Log_Utils.Write($"{name} ignored (damaged): {ex.Message}");
+                return null;
             }
         }
 

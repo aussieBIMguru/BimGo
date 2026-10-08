@@ -43,6 +43,7 @@ namespace BimGo.Commands.Cmds_BimGo
             var links = new Forms.LinkChoices
             {
                 HostKey = LinkResolver.HostKey(doc),
+                ModelFolder = ModelFolderResolver.FolderOf(doc),
                 Items = LinkResolver.Candidates(doc).Select(c => new Forms.LinkChoice
                 {
                     UniqueId = c.UniqueId,
@@ -63,8 +64,20 @@ namespace BimGo.Commands.Cmds_BimGo
                 ElementCount = viewUsable ? ViewScope.Count(doc, activeView) : 0
             };
 
+            // "Review textures…": a resolve-only pass over what this Go would load, and the full material report
+            var textures = new Forms.TextureReviewServices
+            {
+                Review = (trial, progress) => SceneExtractor.Review(uiDoc, trial, progress),
+                ExportReport = progress =>
+                {
+                    string path = MaterialScan.Run(doc, uiApp.Application.VersionNumber, progress, out string summary);
+                    return (path, summary);
+                },
+                Owner = uiApp.MainWindowHandle
+            };
+
             var dialog = new Forms.OptionsWindow(settings, SceneExtractor.DescribeSpawn(uiDoc), counts,
-                () => ParameterScanner.ScanNames(doc), primaryButtonText, phases, links, view);
+                () => ParameterScanner.ScanNames(doc), primaryButtonText, phases, links, view, textures);
             new WindowInteropHelper(dialog).Owner = uiApp.MainWindowHandle;
             if (dialog.ShowDialog() != true) { return null; }
 
@@ -284,7 +297,7 @@ namespace BimGo.Commands.Cmds_BimGo
                         : "Nothing to export: the ticked categories have no geometry in this model.");
                 }
 
-                // The model's comments travel with the file (the sidecar, or a legacy RvtGo sidecar)
+                // The model's comments travel with the file (from its BimGo folder, migrated there from older sidecars)
                 CommentDocument comments = null;
                 if (settings.LoadComments && !string.IsNullOrEmpty(scene.CommentsPath))
                 {
@@ -292,7 +305,7 @@ namespace BimGo.Commands.Cmds_BimGo
                     comments = CommentFiles.Read(scene.CommentsPath, out _);
                 }
 
-                // So do the bookmarks and the saved home of live walkthroughs (the sidecar beside the comments)
+                // So do the bookmarks and the saved home of live walkthroughs (next to the comments)
                 BookmarkDocument bookmarks = string.IsNullOrEmpty(scene.CommentsPath)
                     ? null
                     : BookmarkFiles.Read(BookmarkFiles.SidecarFor(scene.CommentsPath), out _);

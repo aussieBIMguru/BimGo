@@ -62,6 +62,8 @@
 		<!-- Licence texts travel with BimGo.exe (MIT obliges the third-party notices to ship with the binaries) -->
 		<None Include="..\..\LICENSE" Link="LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
 		<None Include="..\..\THIRD-PARTY-NOTICES.txt" Link="THIRD-PARTY-NOTICES.txt" CopyToOutputDirectory="PreserveNewest" />
+		<!-- CC0 proxy textures (Realistic mode stand-ins for missing images): copied beside the exe as Resources\Proxies -->
+		<None Update="Resources\Proxies\*.jpg;Resources\Proxies\*.png;Resources\Proxies\proxies.json" CopyToOutputDirectory="PreserveNewest" />
 	</ItemGroup>
 
 	<!--

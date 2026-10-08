@@ -33,8 +33,29 @@ namespace BimGo.Game
         private BookmarkRecord _editBookmark;
         private bool _editBookmarkIsNew;
 
-        private static readonly string[] COLOUR_OPTIONS = { "Whitecard", "Material" };
+        private static readonly string[] COLOUR_OPTIONS = { "Whitecard", "Material", "Realistic" };
         private static readonly string[] MSAA_OPTIONS = { "Off", "2x", "4x" };
+
+        /// <summary>Reflections: off, some (shine tiers 50 % +), or all (25 % +).</summary>
+        private static readonly string[] REFLECTION_OPTIONS = { "Off", "Some", "All" };
+
+        /// <summary>Debug colours: off, reflection tiers, reflection probe cells.</summary>
+        private static readonly string[] DEBUG_OPTIONS = { "Off", "Reflection", "Probes" };
+
+        /// <summary>The pickable quality profiles (Custom is shown as no selection).</summary>
+        private static readonly string[] PROFILE_OPTIONS = { "Basic", "Medium", "Realistic" };
+
+        /// <summary>The pause menu's right-column tabs.</summary>
+        private static readonly string[] RIGHT_TABS = { "DISPLAY", "REFLECTIONS", "DEBUG" };
+
+        /// <summary>Height of the right column's card (unscaled): fits the Display tab, the tallest.</summary>
+        private const float RIGHT_CARD_HEIGHT = 440f;
+
+        // Open right-column tab: 0 display, 1 reflections, 2 debug (per session)
+        private int _rightTab;
+
+        /// <summary>Slider id of the reflection strength (unique across the menu's sliders).</summary>
+        private const int SLIDER_REFLECT = 17;
 
         #endregion
 
@@ -155,7 +176,7 @@ namespace BimGo.Game
                 else if (text.Length > 0) { Bookmarks.Rename(bookmark, text); }
                 Sound.Play(SoundId.Commit);
                 string verb = _editBookmarkIsNew ? "Bookmarked" : "Renamed to";
-                Toast(Bookmarks.LastError ?? $"{verb} “{bookmark.Name}” ({BookmarkHotkey(bookmark)})");
+                Toast(Bookmarks.LastError ?? $"{verb} “{bookmark.Name}” ({BookmarkHotkey(bookmark)})", important: Bookmarks.LastError != null);
                 return;
             }
 
@@ -168,7 +189,7 @@ namespace BimGo.Game
                 }
                 Comments.Update(editing, text);
                 Sound.Play(SoundId.CommentPlace);
-                Toast(Comments.LastError ?? "Comment updated");
+                Toast(Comments.LastError ?? "Comment updated", important: Comments.LastError != null);
                 return;
             }
 
@@ -180,7 +201,7 @@ namespace BimGo.Game
 
             Comments.Add(_editPoint, text, _editElement, _editLevel);
             Sound.Play(SoundId.CommentPlace);
-            Toast(Comments.LastError ?? $"Comment saved to {Comments.FileName}");
+            Toast(Comments.LastError ?? $"Comment saved to {Comments.FileName}", important: Comments.LastError != null);
         }
 
         /// <summary>
@@ -254,6 +275,11 @@ namespace BimGo.Game
                 BuildBookmarksPanel();
                 return;
             }
+            if (IsTexturesPanelOpen)
+            {
+                BuildTexturesPanel();
+                return;
+            }
 
             FontAtlas f = _ui.Atlas;
             InputState input = _window.Input;
@@ -277,7 +303,8 @@ namespace BimGo.Game
             // Button pitch: 54 px, tightened when the column would run into END SESSION (small or high-DPI screens)
             float endY = height - pad - S(48);
             int hiddenThings = HiddenThingsCount();
-            int buttons = (IsFileMode ? 9 : 7) + (hiddenThings > 0 ? 1 : 0);
+            bool texturesButton = HasTexturePanel;
+            int buttons = (IsFileMode ? 9 : 7) + (hiddenThings > 0 ? 1 : 0) + (texturesButton ? 1 : 0);
             float step = Math.Clamp((endY - S(12) - y) / buttons, S(40), S(54));
             float buttonH = step - S(6);
             if (MenuButton(f, leftX, y, leftW, "RESUME", primary: true, danger: false, height: buttonH)) { SetPaused(false); return; }
@@ -309,6 +336,11 @@ namespace BimGo.Game
             y += step;
             if (MenuButton(f, leftX, y, leftW, BookmarksMenuLabel(), false, false, height: buttonH)) { OpenBookmarks(); return; }
             y += step;
+            if (texturesButton)
+            {
+                if (MenuButton(f, leftX, y, leftW, TexturesMenuLabel(), false, false, height: buttonH)) { OpenTextures(); return; }
+                y += step;
+            }
 
             // Walkthrough-only hiding (Scan I / Shift+I, category and link toggles)
             if (hiddenThings > 0)
@@ -337,8 +369,8 @@ namespace BimGo.Game
             // ---- Middle: geometry toggles
             if (midW > S(300)) { BuildCategoryCards(f, input, midX, pad, midW); }
 
-            // ---- Right: world and display
-            BuildDisplayCard(f, input, rightX, pad, rightW);
+            // ---- Right: quality profile, then Display · Reflections · Debug
+            BuildRightColumn(f, input, rightX, pad, rightW);
 
             // Version / file footer
             Text.Clear().Append(DocumentName).Append(" · ").AppendGrouped(Scene.Elements.Length).Append(" elements · ").AppendGrouped(Scene.TriangleCount).Append(" tris · ")
@@ -496,18 +528,44 @@ namespace BimGo.Game
         }
 
         /// <summary>
-        /// Ground plane, colour, anti-aliasing, FOV, sensitivity and toggles.
+        /// The right column: the quality profile (always visible), then the Display · Reflections · Debug tabs and the
+        /// open tab's card. One fixed card height so the column doesn't jump between tabs.
         /// </summary>
-        private void BuildDisplayCard(FontAtlas f, InputState input, float x, float top, float width)
+        private void BuildRightColumn(FontAtlas f, InputState input, float x, float top, float width)
         {
-            _ui.Text(f.Small, x, top + S(2), "WORLD & DISPLAY", UiTheme.TEXT_MUTED, S(1.8f));
-            float cardTop = top + S(26);
-            float cardH = S(480);
-            _ui.Panel(x, cardTop, width, cardH, UiTheme.CARD, UiTheme.CARD_BORDER);
+            // Quality profile: Basic / Medium / Realistic, or "Custom" once anything it sets was changed by hand
+            QualityProfile profile = CurrentProfile();
+            _ui.Text(f.Small, x, top + S(2), "QUALITY PROFILE", UiTheme.TEXT_MUTED, S(1.8f));
+            if (profile == QualityProfile.Custom) { _ui.TextRight(f.Small, x + width, top + S(2), "CUSTOM", UiTheme.MEASURE_LABEL, S(1.2f)); }
+            int shown = profile == QualityProfile.Custom ? -1 : (int)profile - 1;
+            int picked = Segmented(f, input, x, top + S(22), width, PROFILE_OPTIONS, shown);
+            if (picked != shown && picked >= 0) { ApplyProfile(QualityProfiles.PICKABLE[picked]); }
 
-            float ix = x + S(14), iw = width - S(28);
-            float y = cardTop + S(14);
+            // Tabs
+            float tabsY = top + S(68);
+            int tab = Tabs(f, input, x, tabsY, width, RIGHT_TABS, _rightTab);
+            if (tab != _rightTab)
+            {
+                _rightTab = tab;
+                _activeSlider = -1;
+            }
 
+            float cardTop = tabsY + S(32);
+            _ui.Panel(x, cardTop, width, S(RIGHT_CARD_HEIGHT), UiTheme.CARD, UiTheme.CARD_BORDER);
+            float ix = x + S(14), iw = width - S(28), y = cardTop + S(14);
+            switch (_rightTab)
+            {
+                case 1: BuildReflectionsTab(f, input, ix, y, iw); break;
+                case 2: BuildDebugTab(f, input, ix, y, iw); break;
+                default: BuildDisplayTab(f, input, ix, y, iw); break;
+            }
+        }
+
+        /// <summary>
+        /// Display tab: ground plane, colour, anti-aliasing, FOV, sensitivity and toggles.
+        /// </summary>
+        private void BuildDisplayTab(FontAtlas f, InputState input, float ix, float y, float iw)
+        {
             // Ground plane (relative to the default, shown absolute)
             Text.Clear().Append(_groundZ, 3).Append(" m");
             float ground = Slider(f, input, 0, ix, y, iw, "Ground plane", Text.Span, _groundZ, _groundDefault - 10f, _groundDefault + 10f);
@@ -516,8 +574,14 @@ namespace BimGo.Game
 
             // Colour mode
             _ui.Text(f.Body, ix, y, "Colour mode", UiTheme.TEXT);
-            int colour = Segmented(f, input, ix, y + S(22), iw, COLOUR_OPTIONS, _whitecard ? 0 : 1);
-            _whitecard = colour == 0;
+            int current = _whitecard ? 0 : _realistic ? 2 : 1;
+            int colour = Segmented(f, input, ix, y + S(22), iw, COLOUR_OPTIONS, current);
+            if (colour != current)
+            {
+                _whitecard = colour == 0;
+                _realistic = colour == 2;
+                if (_realistic && !_renderer.HasMaterials) { ToastNoTextures(); }
+            }
             y += S(64);
 
             // Anti-aliasing
@@ -549,6 +613,74 @@ namespace BimGo.Game
             _showFps = Checkbox(f, input, ix, y, iw, "Show FPS", _showFps);
             y += S(28);
             _ambientOcclusion = Checkbox(f, input, ix, y, iw, "Ambient occlusion", _ambientOcclusion);
+        }
+
+        /// <summary>
+        /// Debug tab: colour surfaces by reflection tier or by reflection probe (not saved).
+        /// </summary>
+        private void BuildDebugTab(FontAtlas f, InputState input, float ix, float y, float iw)
+        {
+            _ui.Text(f.Body, ix, y, "Debug colours", UiTheme.TEXT);
+            int debug = Segmented(f, input, ix, y + S(22), iw, DEBUG_OPTIONS, _reflectDebug);
+            if (debug != _reflectDebug)
+            {
+                _reflectDebug = debug;
+                if (debug != 0 && (!_realistic || _renderer == null || !_renderer.HasMaterials))
+                {
+                    Toast("Debug colours need the Realistic colour mode and a snapshot with materials.", 4f);
+                }
+            }
+            y += S(66);
+
+            string help = _reflectDebug switch
+            {
+                1 => "Reflection: red 75 %+, orange 50 %, yellow 25 %, grey none, cyan glass, blue water.",
+                2 => "Probes: one colour per reflection probe, blended at room edges; grey = sky. Probes bake as you look around.",
+                _ => "Colours surfaces by reflection tier or by the probe they read. Needs the Realistic colour mode. Not saved."
+            };
+            _ui.TextWrapped(f.Body, ix, y, iw, help, UiTheme.TEXT_MUTED, maxLines: 6);
+        }
+
+        /// <summary>
+        /// The toast for Realistic without textures in the snapshot.
+        /// </summary>
+        private void ToastNoTextures() =>
+            Toast("No textures in this snapshot: tick “Extract materials and textures” at Go (or Export) to see them.", 5f);
+
+        /// <summary>
+        /// A row of tabs (text with an accent underline on the open one).
+        /// </summary>
+        /// <returns>The open tab (changed by a click).</returns>
+        private int Tabs(FontAtlas f, InputState input, float x, float y, float w, string[] labels, int selected)
+        {
+            float h = S(28);
+            float tab = w / labels.Length;
+            _ui.Rect(x, y + h - MathF.Max(1f, UiScale), w, MathF.Max(1f, UiScale), Rgba.Hex(0xFFFFFF, 0.12f));
+            for (int i = 0; i < labels.Length; i++)
+            {
+                float tx = x + i * tab;
+                bool on = i == selected;
+                bool hover = !on && Hover(input, tx, y, tab, h);
+                uint colour = on ? UiTheme.TEXT : hover ? UiTheme.ACCENT : UiTheme.TEXT_MUTED;
+                _ui.TextCentred(f.Small, tx + tab * 0.5f, y + S(7), labels[i], colour, S(1.4f));
+                if (on) { _ui.Rect(tx + S(6), y + h - S(2), tab - S(12), S(2), UiTheme.ACCENT); }
+                if (hover && input.LeftPressed)
+                {
+                    selected = i;
+                    Sound.Play(SoundId.UiClick);
+                }
+            }
+            return selected;
+        }
+
+        /// <summary>
+        /// The colour mode as the status panel shows it.
+        /// </summary>
+        private string ColourModeLabel()
+        {
+            if (_whitecard) { return "Whitecard"; }
+            if (!_realistic) { return "Material colour"; }
+            return _renderer != null && _renderer.HasMaterials ? "Realistic" : "Realistic (no textures)";
         }
 
         #endregion

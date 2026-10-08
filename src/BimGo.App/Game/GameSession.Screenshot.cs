@@ -53,7 +53,7 @@ namespace BimGo.Game
             catch (Exception ex)
             {
                 Utilities.Log_Utils.Write($"Screenshot failed: {ex}");
-                Toast("Screenshot failed (see the log)");
+                Toast("Screenshot failed (see the log)", important: true);
                 return;
             }
 

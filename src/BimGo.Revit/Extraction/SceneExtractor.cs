@@ -74,7 +74,9 @@ namespace BimGo.Extraction
         /// </summary>
         /// <param name="doc">The document to extract.</param>
         /// <param name="settings">The launch settings.</param>
-        private SceneExtractor(Document doc, LaunchSettings settings, OperationProgress progress)
+        /// <param name="progress">Optional progress / cancellation.</param>
+        /// <param name="resolveOnly">Texture review: read materials and find images, embed nothing.</param>
+        private SceneExtractor(Document doc, LaunchSettings settings, OperationProgress progress, bool resolveOnly = false)
         {
             _doc = doc;
             _settings = settings;
@@ -90,6 +92,9 @@ namespace BimGo.Extraction
                 ComputeReferences = false,
                 IncludeNonVisibleObjects = false
             };
+            _extractMaterials = settings.ExtractTextures || resolveOnly;
+            _resolveOnly = resolveOnly;
+            _textureCap = MaterialData.NearestTextureSize(settings.TextureMaxSize);
             _emissiveKeywords = (settings.EmissiveKeywords ?? LaunchSettings.DefaultEmissiveKeywords())
                 .Select(k => k.Trim().ToLowerInvariant())
                 .Where(k => k.Length > 0)
@@ -148,76 +153,18 @@ namespace BimGo.Extraction
         {
             var stopwatch = Stopwatch.StartNew();
             IReadOnlyList<CategoryDef> catalog = CategoryCatalog.All;
-            var enabled = new HashSet<string>(_settings.EnabledCategories);
 
             // The existing / new phases first: the walkthrough shows the model as it stands in the new phase
             _phases = PhaseResolver.Resolve(_doc, uiDoc.ActiveView, _settings);
 
-            // Active-view-only: the view decides what comes in (null = extract by category)
-            DB.View view = _settings.ActiveViewOnly ? ViewScope.Resolve(uiDoc, _doc) : null;
-            if (_settings.ActiveViewOnly)
-            {
-                Utilities.Log_Utils.Write(view != null
-                    ? $"Active view only: “{view.Name}” ({view.ViewType})."
-                    : "Active view only: no view that shows model elements is available; extracting by category instead.");
-            }
+            // Materials and textures (opt-in): find where texture images live on this machine, as Revit does
+            if (_extractMaterials) { PrepareTextures(); }
 
-            // The host, then the link instances ticked for this model in the Options dialog (none by default).
-            // In a 3D view the host's geometry is read through the view (its subcategory visibility and detail level).
-            var host = new SourceModel
-            {
-                Doc = _doc,
-                Phases = _phases,
-                GeometryOptions = view is View3D ? new Options { View = view, ComputeReferences = false, IncludeNonVisibleObjects = false } : _geometryOptions
-            };
-            _src = host;
-            var sources = new List<SourceModel> { host };
-            foreach (LinkCandidate candidate in LinkResolver.Selected(_doc, _settings))
-            {
-                if (view != null && ViewScope.HidesLink(view, candidate.InstanceId))
-                {
-                    Utilities.Log_Utils.Write($"Link “{candidate.Name}” is hidden in the active view: skipped.");
-                    continue;
-                }
-                sources.Add(CreateLinkSource(candidate, sources.Count));
-            }
-
-            // Gather candidate elements per source and enabled definition first (needed for the origin)
-            var work = new List<(SourceModel Source, CategoryDef Def, List<Element> Elements)>();
+            // The host and the ticked links, then their candidate elements (needed for the origin)
+            List<SourceModel> sources = PrepareSources(uiDoc, out DB.View view);
+            SourceModel host = sources[0];
             _progress?.Begin("Finding elements", 0.0, 0.08);
-            int sourceNumber = 0;
-            foreach (SourceModel source in sources)
-            {
-                _progress?.Step(sourceNumber++, sources.Count);
-                _progress?.Detail(source.Link == 0 ? _doc.Title : source.Info.Label);
-                _progress?.ThrowIfCancelled();
-                if (view != null)
-                {
-                    GatherVisible(source, view, work);
-                    continue;
-                }
-
-                foreach (CategoryDef def in catalog)
-                {
-                    if (!enabled.Contains(def.Key)) { continue; }
-                    try
-                    {
-                        FilteredElementCollector collector = CategoryResolver.Collect(source.Doc, def);
-                        if (collector == null) { continue; }
-
-                        var elements = new List<Element>();
-                        foreach (Element element in collector)
-                        {
-                            if (IsExtractable(element, source.Phases)) { elements.Add(element); }
-                        }
-                        work.Add((source, def, elements));
-                    }
-                    catch (Exception ex)
-                    {
-                        Utilities.Log_Utils.Write($"{source.Describe()}: {def.Key} skipped: {ex.Message}");
-                    }
-                }
-            }
+            List<(SourceModel Source, CategoryDef Def, List<Element> Elements)> work = Gather(sources, view);
 
             // Scene origin: median of element centres, rounded to whole metres (robust against outliers)
             _origin = ComputeOrigin(work.SelectMany(w => w.Elements.Select(e => (e, w.Source.Transform))));
@@ -312,6 +259,7 @@ namespace BimGo.Extraction
                 Site = BuildSite(uiDoc),
                 Parameters = _parameters?.Build() ?? ParameterTable.Empty,
                 Lighting = BuildLighting(),
+                Materials = BuildMaterials(),
                 CategoryLoaded = loaded,
                 CategoryElementCounts = counts,
                 Settings = _settings,
@@ -320,6 +268,87 @@ namespace BimGo.Extraction
                 SkippedCount = _skippedCount,
                 ExtractionTime = stopwatch.Elapsed
             };
+        }
+
+        /// <summary>
+        /// The host source, then the link instances ticked for this model in the Options dialog (none by default),
+        /// minus links the active view hides when extracting the active view only. In a 3D view the host's geometry
+        /// is read through the view (its subcategory visibility and detail level).
+        /// </summary>
+        /// <param name="uiDoc">The active UIDocument.</param>
+        /// <param name="view">The active view when "active view only" applies (null = extract by category).</param>
+        private List<SourceModel> PrepareSources(UIDocument uiDoc, out DB.View view)
+        {
+            view = _settings.ActiveViewOnly ? ViewScope.Resolve(uiDoc, _doc) : null;
+            if (_settings.ActiveViewOnly)
+            {
+                Utilities.Log_Utils.Write(view != null
+                    ? $"Active view only: “{view.Name}” ({view.ViewType})."
+                    : "Active view only: no view that shows model elements is available; extracting by category instead.");
+            }
+
+            var host = new SourceModel
+            {
+                Doc = _doc,
+                Phases = _phases,
+                GeometryOptions = view is View3D ? new Options { View = view, ComputeReferences = false, IncludeNonVisibleObjects = false } : _geometryOptions
+            };
+            _src = host;
+            var sources = new List<SourceModel> { host };
+            foreach (LinkCandidate candidate in LinkResolver.Selected(_doc, _settings))
+            {
+                if (view != null && ViewScope.HidesLink(view, candidate.InstanceId))
+                {
+                    Utilities.Log_Utils.Write($"Link “{candidate.Name}” is hidden in the active view: skipped.");
+                    continue;
+                }
+                sources.Add(CreateLinkSource(candidate, sources.Count));
+            }
+            return sources;
+        }
+
+        /// <summary>
+        /// The candidate elements per source and enabled definition (by category, or what the active view shows).
+        /// Moves the current progress stage and stops if cancelled. Shared by the extraction and the texture review.
+        /// </summary>
+        private List<(SourceModel Source, CategoryDef Def, List<Element> Elements)> Gather(List<SourceModel> sources, DB.View view)
+        {
+            var enabled = new HashSet<string>(_settings.EnabledCategories ?? new List<string>());
+            var work = new List<(SourceModel Source, CategoryDef Def, List<Element> Elements)>();
+            int sourceNumber = 0;
+            foreach (SourceModel source in sources)
+            {
+                _progress?.Step(sourceNumber++, sources.Count);
+                _progress?.Detail(source.Link == 0 ? _doc.Title : source.Info.Label);
+                _progress?.ThrowIfCancelled();
+                if (view != null)
+                {
+                    GatherVisible(source, view, work);
+                    continue;
+                }
+
+                foreach (CategoryDef def in CategoryCatalog.All)
+                {
+                    if (!enabled.Contains(def.Key)) { continue; }
+                    try
+                    {
+                        FilteredElementCollector collector = CategoryResolver.Collect(source.Doc, def);
+                        if (collector == null) { continue; }
+
+                        var elements = new List<Element>();
+                        foreach (Element element in collector)
+                        {
+                            if (IsExtractable(element, source.Phases)) { elements.Add(element); }
+                        }
+                        work.Add((source, def, elements));
+                    }
+                    catch (Exception ex)
+                    {
+                        Utilities.Log_Utils.Write($"{source.Describe()}: {def.Key} skipped: {ex.Message}");
+                    }
+                }
+            }
+            return work;
         }
 
         /// <summary>
@@ -412,6 +441,9 @@ namespace BimGo.Extraction
 
             /// <summary>Material colours and glow by material id (ids are per document).</summary>
             public Dictionary<long, MaterialLook> MaterialLooks { get; } = new();
+
+            /// <summary>Realistic-mode material table indices by material id (textures extracted only).</summary>
+            public Dictionary<long, ushort> MaterialIndex { get; } = new();
 
             /// <summary>Category colours by category id.</summary>
             public Dictionary<long, uint> CategoryColours { get; } = new();
@@ -597,6 +629,7 @@ namespace BimGo.Extraction
             _tmpEmissive.Clear();
             _tmpOpaque.Clear();
             _tmpTransparent.Clear();
+            ResetMaterialStreams();
             _tmpTriangles = 0;
             _overLimit = false;
             _thresholdActive = def.ThresholdApplies;
@@ -612,6 +645,7 @@ namespace BimGo.Extraction
                 _tmpEmissive.Clear();
                 _tmpOpaque.Clear();
                 _tmpTransparent.Clear();
+                ResetMaterialStreams();
 
                 if (_settings.OverLimit == OverLimitMode.Skip)
                 {
@@ -633,6 +667,7 @@ namespace BimGo.Extraction
             // Commit
             int vertexBase = _vertices.Count;
             CommitEmissive(vertexBase);
+            CommitMaterialStreams();
             Aabb bounds = Aabb.Empty;
             foreach (SceneVertex vertex in _tmpVertices)
             {
@@ -697,7 +732,7 @@ namespace BimGo.Extraction
                         if (CountTriangles(mesh.NumTriangles))
                         {
                             MaterialLook look = MaterialLookOf(mesh.MaterialElementId, fallback);
-                            AddMesh(mesh, transform, null, look.Colour, EmissiveOf(look));
+                            AddMesh(mesh, transform, null, look.Colour, EmissiveOf(look), UvMapping.BOX, look.Material);
                         }
                         break;
 
@@ -729,7 +764,8 @@ namespace BimGo.Extraction
 
                 MaterialLook look = MaterialLookOf(face.MaterialElementId, fallback);
                 XYZ planarNormal = face is PlanarFace planar ? planar.FaceNormal : null;
-                AddMesh(mesh, transform, planarNormal, look.Colour, EmissiveOf(look));
+                UvMapping mapping = look.Material == MaterialData.NONE ? UvMapping.BOX : MappingOf(face);
+                AddMesh(mesh, transform, planarNormal, look.Colour, EmissiveOf(look), mapping, look.Material);
             }
         }
 
@@ -757,7 +793,9 @@ namespace BimGo.Extraction
         /// <param name="planarNormal">The face normal for planar faces (local), or null.</param>
         /// <param name="colour">The RGBA8 colour.</param>
         /// <param name="emissive">Packed glow (<see cref="LightingData.PackEmissive"/>), or 0. Glowing surfaces are always opaque.</param>
-        private void AddMesh(Mesh mesh, Transform transform, XYZ planarNormal, uint colour, uint emissive)
+        /// <param name="mapping">How the vertices get surface coordinates (Realistic mode).</param>
+        /// <param name="material">The Realistic-mode material index, or <see cref="MaterialData.NONE"/>.</param>
+        private void AddMesh(Mesh mesh, Transform transform, XYZ planarNormal, uint colour, uint emissive, UvMapping mapping, ushort material)
         {
             IList<XYZ> points = mesh.Vertices;
             int vertexCount = points.Count;
@@ -854,6 +892,9 @@ namespace BimGo.Extraction
                 _tmpVertices[baseIndex + i] = vertex;
             }
 
+            // Realistic mode: material index and surface coordinates (from the mesh's own points, so textures move with families)
+            AppendSurfaceStreams(points, baseIndex, mapping, material);
+
         }
 
         /// <summary>
@@ -930,7 +971,7 @@ namespace BimGo.Extraction
         /// </summary>
         private MaterialLook MaterialLookOf(ElementId materialId, uint fallback)
         {
-            if (materialId == null || materialId == ElementId.InvalidElementId) { return new MaterialLook(fallback, 0u, false); }
+            if (materialId == null || materialId == ElementId.InvalidElementId) { return new MaterialLook(fallback, 0u, false, MaterialData.NONE); }
 
             long key = materialId.Value;
             if (_src.MaterialLooks.TryGetValue(key, out MaterialLook cached)) { return cached; }
@@ -938,19 +979,22 @@ namespace BimGo.Extraction
             uint colour = fallback;
             uint selfIllumination = 0u;
             bool keyword = false;
+            ushort index = MaterialData.NONE;
             if (_src.Doc.GetElement(materialId) is Material material)
             {
                 DB.Color c = material.Color;
                 if (c != null && c.IsValid)
                 {
-                    int alpha = Math.Clamp(255 - (int)(material.Transparency * 2.55), 64, 255);
+                    // A material named "mirror" is a mirror even when modelled with a glass appearance: drawn opaque
+                    int alpha = ReflectivityReader.IsMirrorByName(material) ? 255 : Math.Clamp(255 - (int)(material.Transparency * 2.55), 64, 255);
                     colour = Pack(c.Red, c.Green, c.Blue, (byte)alpha);
                 }
                 selfIllumination = ReadSelfIllumination(material);
                 keyword = MatchesEmissiveKeyword(material.Name);
+                index = MaterialIndexOf(material);
             }
 
-            var look = new MaterialLook(colour, selfIllumination, keyword);
+            var look = new MaterialLook(colour, selfIllumination, keyword, index);
             _src.MaterialLooks[key] = look;
             return look;
         }
@@ -1445,36 +1489,11 @@ namespace BimGo.Extraction
         }
 
         /// <summary>
-        /// The comments sidecar path: beside the model, else in %LocalAppData%\BimGo\Comments for unsaved/cloud models.
-        /// (A legacy &lt;model&gt;.rvtgo.json next to it is migrated when the session loads comments.)
+        /// The comments path in the model's BimGo folder (<c>%LocalAppData%\BimGo\Models\&lt;title&gt;_&lt;hash&gt;\comments.json</c>),
+        /// with the bookmarks, sun and visibility files beside it. Prepares the folder: older sidecars beside the
+        /// model or in the old Comments folder are copied in once, and with sharing on newer shared copies are taken.
         /// </summary>
-        public string ResolveCommentsPath()
-        {
-            string fileName = MakeSafeFileName(_doc.Title) + BimGoFormat.SIDECAR_SUFFIX;
-            try
-            {
-                string modelPath = _doc.PathName;
-                if (!_doc.IsModelInCloud && !string.IsNullOrEmpty(modelPath) && Path.IsPathRooted(modelPath))
-                {
-                    string folder = Path.GetDirectoryName(modelPath);
-                    if (Directory.Exists(folder))
-                    {
-                        return Path.Combine(folder, Path.GetFileNameWithoutExtension(modelPath) + BimGoFormat.SIDECAR_SUFFIX);
-                    }
-                }
-            }
-            catch
-            {
-                // Fall back below
-            }
-            return Path.Combine(Utilities.Log_Utils.Folder, "Comments", fileName);
-        }
-
-        private static string MakeSafeFileName(string name)
-        {
-            foreach (char c in Path.GetInvalidFileNameChars()) { name = name.Replace(c, '_'); }
-            return name;
-        }
+        public string ResolveCommentsPath() => ModelFolderResolver.PrepareCommentsPath(_doc, _settings);
 
         #endregion
 

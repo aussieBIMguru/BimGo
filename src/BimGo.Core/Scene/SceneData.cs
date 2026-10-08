@@ -324,6 +324,9 @@ namespace BimGo.Scene
         /// <summary>Glowing surfaces and lighting-fixture lights (optional; never null).</summary>
         public LightingData Lighting { get; init; } = LightingData.Empty;
 
+        /// <summary>Materials, textures and surface coordinates for Realistic mode (optional; never null).</summary>
+        public MaterialData Materials { get; init; } = MaterialData.Empty;
+
         /// <summary>Optional extra parameter values per element (names picked in the Options dialog). Never null.</summary>
         public ParameterTable Parameters { get; init; } = ParameterTable.Empty;
 

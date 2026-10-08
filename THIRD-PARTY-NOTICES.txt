@@ -21,6 +21,38 @@ Development only (not shipped): MSTest.Sdk 4.4.1, (c) Microsoft Corporation,
 MIT licence, https://github.com/microsoft/testfx
 
 --------------------------------------------------------------------------------
+Proxy textures (Resources\Proxies, shipped beside BimGo.exe)
+
+Stand-in colour maps for materials whose own image is missing (Realistic mode).
+From ambientCG (https://ambientcg.com), released under CC0 1.0 Universal
+(public domain dedication, https://creativecommons.org/publicdomain/zero/1.0/).
+No attribution is required; it is given here anyway. Colour maps only, resized
+to 512 px. These images are never embedded in .bimgo files. No Autodesk
+textures are included in BimGo.
+
+  brick              Bricks059         https://ambientcg.com/a/Bricks059
+  blockwork          Bricks066         https://ambientcg.com/a/Bricks066
+  concrete           Concrete034       https://ambientcg.com/a/Concrete034
+  concrete-board     Concrete044A      https://ambientcg.com/a/Concrete044A
+  render             Plaster001        https://ambientcg.com/a/Plaster001
+  timber-floor       WoodFloor040      https://ambientcg.com/a/WoodFloor040
+  timber-panel       Wood003           https://ambientcg.com/a/Wood003
+  plywood            Chipboard005      https://ambientcg.com/a/Chipboard005
+  carpet             Carpet016         https://ambientcg.com/a/Carpet016
+  vinyl              Plastic012A       https://ambientcg.com/a/Plastic012A
+  tile-300           Tiles107          https://ambientcg.com/a/Tiles107
+  tile-600           Tiles133B         https://ambientcg.com/a/Tiles133B
+  marble             Marble004         https://ambientcg.com/a/Marble004
+  marble-brushed     Onyx005           https://ambientcg.com/a/Onyx005
+  stone              PavingStones128   https://ambientcg.com/a/PavingStones128
+  metal-brushed      Metal009          https://ambientcg.com/a/Metal009
+  metal-galvanised   Metal052C         https://ambientcg.com/a/Metal052C
+  gravel             Gravel043         https://ambientcg.com/a/Gravel043
+  grass              Grass001          https://ambientcg.com/a/Grass001
+  asphalt            Asphalt031        https://ambientcg.com/a/Asphalt031
+  fabric             Fabric030         https://ambientcg.com/a/Fabric030
+
+--------------------------------------------------------------------------------
 MIT License
 
 Copyright (c) the copyright holders listed above for each component.

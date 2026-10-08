@@ -1,0 +1,236 @@
+{
+  "_comment": "BimGo CC0 proxy textures. sizeU / sizeV: real-world metres one repeat covers. Images ship with the app, never inside a .bimgo.",
+  "proxies": [
+    {
+      "keyword": "brick",
+      "file": "brick.jpg",
+      "sizeU": 0.9,
+      "sizeV": 1.38,
+      "title": "Brick, red, stretcher bond (about 16 courses per repeat)",
+      "original": "brick.jpg",
+      "source": "https://ambientcg.com/a/Bricks059",
+      "licence": "CC0 1.0 Universal",
+      "assetId": "Bricks059"
+    },
+    {
+      "keyword": "blockwork",
+      "file": "blockwork.jpg",
+      "sizeU": 1.2,
+      "sizeV": 1.8,
+      "title": "Concrete block, 400 x 200 (3 blocks x 9 courses per repeat)",
+      "original": "block.jpg",
+      "source": "https://ambientcg.com/a/Bricks066",
+      "licence": "CC0 1.0 Universal",
+      "assetId": "Bricks066"
+    },
+    {
+      "keyword": "concrete",
+      "file": "concrete.jpg",
+      "sizeU": 2.4,
+      "sizeV": 1.2,
+      "title": "Concrete, smooth",
+      "original": "concrete_smooth.jpg",
+      "source": "https://ambientcg.com/a/Concrete034",
+      "licence": "CC0 1.0 Universal",
+      "assetId": "Concrete034"
+    },
+    {
+      "keyword": "concrete-board",
+      "file": "concrete-board.jpg",
+      "sizeU": 2.4,
+      "sizeV": 2.4,
+      "title": "Concrete, board-formed",
+      "original": "concrete_formed.jpg",
+      "source": "https://ambientcg.com/a/Concrete044A",
+      "licence": "CC0 1.0 Universal",
+      "assetId": "Concrete044A"
+    },
+    {
+      "keyword": "render",
+      "file": "render.jpg",
+      "sizeU": 2.0,
+      "sizeV": 2.0,
+      "title": "Render / plaster",
+      "original": "plaster.jpg",
+      "source": "https://ambientcg.com/a/Plaster001",
+      "licence": "CC0 1.0 Universal",
+      "assetId": "Plaster001"
+    },
+    {
+      "keyword": "timber-floor",
+      "file": "timber-floor.jpg",
+      "sizeU": 1.2,
+      "sizeV": 1.2,
+      "title": "Timber floorboards (about 9 boards per repeat)",
+      "original": "timber_floorboards.jpg",
+      "source": "https://ambientcg.com/a/WoodFloor040",
+      "licence": "CC0 1.0 Universal",
+      "assetId": "WoodFloor040"
+    },
+    {
+      "keyword": "timber-panel",
+      "file": "timber-panel.jpg",
+      "sizeU": 1.2,
+      "sizeV": 1.2,
+      "title": "Timber veneer",
+      "original": "timber_veneer.jpg",
+      "source": "https://ambientcg.com/a/Wood003",
+      "licence": "CC0 1.0 Universal",
+      "assetId": "Wood003"
+    },
+    {
+      "keyword": "plywood",
+      "file": "plywood.jpg",
+      "sizeU": 1.2,
+      "sizeV": 1.2,
+      "title": "Plywood",
+      "original": "plywood.jpg",
+      "source": "https://ambientcg.com/a/Chipboard005",
+      "licence": "CC0 1.0 Universal",
+      "assetId": "Chipboard005"
+    },
+    {
+      "keyword": "carpet",
+      "file": "carpet.jpg",
+      "sizeU": 2.0,
+      "sizeV": 2.0,
+      "title": "Carpet",
+      "original": "carpet.jpg",
+      "source": "https://ambientcg.com/a/Carpet016",
+      "licence": "CC0 1.0 Universal",
+      "assetId": "Carpet016"
+    },
+    {
+      "keyword": "vinyl",
+      "file": "vinyl.jpg",
+      "sizeU": 1.0,
+      "sizeV": 1.0,
+      "title": "Vinyl, charcoal",
+      "original": "image.jpg (sent in chat)",
+      "source": "https://ambientcg.com/a/Plastic012A",
+      "licence": "CC0 1.0 Universal",
+      "assetId": "Plastic012A"
+    },
+    {
+      "keyword": "tile-300",
+      "file": "tile-300.jpg",
+      "sizeU": 3.6,
+      "sizeV": 3.6,
+      "title": "Tile 300 x 300 (12 x 12 per repeat)",
+      "original": "tiles300.jpg",
+      "source": "https://ambientcg.com/a/Tiles107",
+      "licence": "CC0 1.0 Universal",
+      "assetId": "Tiles107"
+    },
+    {
+      "keyword": "tile-600",
+      "file": "tile-600.jpg",
+      "sizeU": 4.8,
+      "sizeV": 4.8,
+      "title": "Tile 600 x 600 (8 x 8 per repeat)",
+      "original": "tiles600.jpg",
+      "source": "https://ambientcg.com/a/Tiles133B",
+      "licence": "CC0 1.0 Universal",
+      "assetId": "Tiles133B"
+    },
+    {
+      "keyword": "marble",
+      "file": "marble.jpg",
+      "sizeU": 1.5,
+      "sizeV": 1.5,
+      "title": "Marble, white",
+      "original": "MARBLE.jpg",
+      "source": "https://ambientcg.com/a/Marble004",
+      "licence": "CC0 1.0 Universal",
+      "assetId": "Marble004"
+    },
+    {
+      "keyword": "marble-brushed",
+      "file": "marble-brushed.jpg",
+      "sizeU": 1.5,
+      "sizeV": 1.5,
+      "title": "Onyx, figured (pick by hand)",
+      "original": "MARBLEBRUSHED.jpg",
+      "source": "https://ambientcg.com/a/Onyx005",
+      "licence": "CC0 1.0 Universal",
+      "assetId": "Onyx005"
+    },
+    {
+      "keyword": "stone",
+      "file": "stone.jpg",
+      "sizeU": 2.0,
+      "sizeV": 2.0,
+      "title": "Stone cladding",
+      "original": "stonecLADDING.jpg",
+      "source": "https://ambientcg.com/a/PavingStones128",
+      "licence": "CC0 1.0 Universal",
+      "assetId": "PavingStones128"
+    },
+    {
+      "keyword": "metal-brushed",
+      "file": "metal-brushed.jpg",
+      "sizeU": 1.0,
+      "sizeV": 1.0,
+      "title": "Metal, brushed",
+      "original": "metalbrushed.jpg",
+      "source": "https://ambientcg.com/a/Metal009",
+      "licence": "CC0 1.0 Universal",
+      "assetId": "Metal009"
+    },
+    {
+      "keyword": "metal-galvanised",
+      "file": "metal-galvanised.jpg",
+      "sizeU": 2.0,
+      "sizeV": 2.0,
+      "title": "Metal, galvanised",
+      "original": "metalgavlanized.jpg",
+      "source": "https://ambientcg.com/a/Metal052C",
+      "licence": "CC0 1.0 Universal",
+      "assetId": "Metal052C"
+    },
+    {
+      "keyword": "gravel",
+      "file": "gravel.jpg",
+      "sizeU": 1.5,
+      "sizeV": 1.5,
+      "title": "Gravel",
+      "original": "gravel.jpg",
+      "source": "https://ambientcg.com/a/Gravel043",
+      "licence": "CC0 1.0 Universal",
+      "assetId": "Gravel043"
+    },
+    {
+      "keyword": "grass",
+      "file": "grass.jpg",
+      "sizeU": 2.0,
+      "sizeV": 2.0,
+      "title": "Grass",
+      "original": "grass.jpg",
+      "source": "https://ambientcg.com/a/Grass001",
+      "licence": "CC0 1.0 Universal",
+      "assetId": "Grass001"
+    },
+    {
+      "keyword": "asphalt",
+      "file": "asphalt.jpg",
+      "sizeU": 2.5,
+      "sizeV": 2.5,
+      "title": "Asphalt",
+      "original": "ASPHALT.jpg",
+      "source": "https://ambientcg.com/a/Asphalt031",
+      "licence": "CC0 1.0 Universal",
+      "assetId": "Asphalt031"
+    },
+    {
+      "keyword": "fabric",
+      "file": "fabric.jpg",
+      "sizeU": 0.3,
+      "sizeV": 0.3,
+      "title": "Fabric",
+      "original": "fabric.jpg",
+      "source": "https://ambientcg.com/a/Fabric030",
+      "licence": "CC0 1.0 Universal",
+      "assetId": "Fabric030"
+    }
+  ]
+}

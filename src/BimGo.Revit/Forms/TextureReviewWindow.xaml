@@ -1,0 +1,203 @@
+<Window x:Class="BimGo.Forms.TextureReviewWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="BimGo — Review textures"
+        Width="1060" Height="760" MinWidth="820" MinHeight="520"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Background="#F6F7F8"
+        FontFamily="Segoe UI" FontSize="13" Foreground="#1B1F24"
+        UseLayoutRounding="True" SnapsToDevicePixels="True">
+
+    <Window.Resources>
+        <SolidColorBrush x:Key="Accent" Color="#0E7490"/>
+        <SolidColorBrush x:Key="Muted" Color="#4B5560"/>
+        <SolidColorBrush x:Key="CardBorder" Color="#DADDE1"/>
+
+        <Style x:Key="SectionHeader" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="{StaticResource Muted}"/>
+            <Setter Property="Margin" Value="0,0,0,8"/>
+        </Style>
+
+        <Style x:Key="Card" TargetType="Border">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="BorderBrush" Value="{StaticResource CardBorder}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="12"/>
+        </Style>
+
+        <Style x:Key="PrimaryButton" TargetType="Button">
+            <Setter Property="Background" Value="{StaticResource Accent}"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Height" Value="36"/>
+            <Setter Property="Padding" Value="22,0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+
+        <Style x:Key="SecondaryButton" TargetType="Button">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="BorderBrush" Value="#B7BDC4"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Height" Value="32"/>
+            <Setter Property="Padding" Value="14,0"/>
+            <Setter Property="Margin" Value="0,0,8,0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+
+        <!-- Filter chips -->
+        <Style x:Key="Chip" TargetType="RadioButton">
+            <Setter Property="Margin" Value="0,0,6,0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="Chip" CornerRadius="14" Padding="12,4" BorderThickness="1" BorderBrush="#B7BDC4" Background="White">
+                            <ContentPresenter VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Chip" Property="Background" Value="#E6F4F7"/>
+                                <Setter TargetName="Chip" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <DockPanel LastChildFill="True">
+
+        <!-- Footer -->
+        <Border DockPanel.Dock="Bottom" Background="White" BorderBrush="{StaticResource CardBorder}" BorderThickness="0,1,0,0" Padding="24,14">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button x:Name="ButtonCancel" Content="Cancel" Style="{StaticResource SecondaryButton}" Height="36" IsCancel="True" Click="ButtonCancel_Click"/>
+                    <Button x:Name="ButtonSave" Content="Save choices" Style="{StaticResource PrimaryButton}" IsDefault="True" Click="ButtonSave_Click"/>
+                </StackPanel>
+                <Button x:Name="ButtonReport" DockPanel.Dock="Left" Content="Export report…" Style="{StaticResource SecondaryButton}" Height="36" Click="ButtonReport_Click"
+                        ToolTip="Writes the full material report (schemas, every appearance property, tint and invert, image sizes) for diagnostics."/>
+                <TextBlock x:Name="TextFooter" VerticalAlignment="Center" FontSize="12" Foreground="{StaticResource Muted}" TextWrapping="Wrap"
+                           Text="Choices are remembered for this model on this computer. Nothing in the Revit model changes."/>
+            </DockPanel>
+        </Border>
+
+        <!-- Deep scan results (shown while a scan runs) -->
+        <Border x:Name="PanelScan" DockPanel.Dock="Bottom" Visibility="Collapsed" Background="#FBFCFD" BorderBrush="{StaticResource CardBorder}" BorderThickness="0,1,0,0" Padding="24,14">
+            <DockPanel>
+                <TextBlock x:Name="TextScanHeader" DockPanel.Dock="Top" FontWeight="SemiBold" TextWrapping="Wrap" Text="—"/>
+                <TextBlock x:Name="TextScanHint" DockPanel.Dock="Top" Margin="0,4,0,8" FontSize="12" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Text="—"/>
+                <DockPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                        <Button x:Name="ButtonScanCancel" Content="Stop scan" Style="{StaticResource SecondaryButton}" Click="ButtonScanCancel_Click"/>
+                        <Button x:Name="ButtonScanDone" Content="Accept ticked, done" Style="{StaticResource SecondaryButton}" Click="ButtonScanDone_Click"/>
+                        <Button x:Name="ButtonScanNext" Content="Accept ticked, next stage" Style="{StaticResource PrimaryButton}" Height="32" Click="ButtonScanNext_Click"/>
+                    </StackPanel>
+                    <CheckBox x:Name="CheckRememberFolder" VerticalAlignment="Center" Content="Remember this folder for all models"
+                              ToolTip="Every extraction then looks in this folder (by exact file name) for textures Revit can't find."/>
+                </DockPanel>
+                <ListView x:Name="ListScan" Height="190" BorderBrush="{StaticResource CardBorder}">
+                    <ListView.View>
+                        <GridView>
+                            <GridViewColumn Header="Use" Width="44">
+                                <GridViewColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <CheckBox IsChecked="{Binding Accepted, Mode=TwoWay}" IsEnabled="{Binding HasCandidate}"/>
+                                    </DataTemplate>
+                                </GridViewColumn.CellTemplate>
+                            </GridViewColumn>
+                            <GridViewColumn Header="Missing image" Width="230" DisplayMemberBinding="{Binding RawName}"/>
+                            <GridViewColumn Header="Match" Width="70" DisplayMemberBinding="{Binding StageLabel}"/>
+                            <GridViewColumn Header="Found file" Width="460">
+                                <GridViewColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <ComboBox ItemsSource="{Binding Candidates}" SelectedItem="{Binding Selected, Mode=TwoWay}" MinWidth="440"
+                                                  IsEnabled="{Binding HasCandidate}"/>
+                                    </DataTemplate>
+                                </GridViewColumn.CellTemplate>
+                            </GridViewColumn>
+                            <GridViewColumn Header="Materials" Width="80" DisplayMemberBinding="{Binding MaterialCount}"/>
+                        </GridView>
+                    </ListView.View>
+                </ListView>
+            </DockPanel>
+        </Border>
+
+        <DockPanel Margin="24,18,24,12">
+
+            <!-- Header -->
+            <StackPanel DockPanel.Dock="Top">
+                <TextBlock x:Name="TextSummary" FontSize="15" FontWeight="SemiBold" Text="—"/>
+                <TextBlock x:Name="TextLocations" Margin="0,4,0,12" FontSize="12" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Text="—"/>
+            </StackPanel>
+
+            <!-- Filters and actions -->
+            <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+                    <RadioButton x:Name="ChipMissing" Style="{StaticResource Chip}" GroupName="Filter" Content="Missing" IsChecked="True" Checked="Filter_Changed"/>
+                    <RadioButton x:Name="ChipProxy" Style="{StaticResource Chip}" GroupName="Filter" Content="Proxy" Checked="Filter_Changed"/>
+                    <RadioButton x:Name="ChipAll" Style="{StaticResource Chip}" GroupName="Filter" Content="All" Checked="Filter_Changed"/>
+                </StackPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button x:Name="ButtonBrowse" Content="Browse image…" Style="{StaticResource SecondaryButton}" Click="ButtonBrowse_Click"/>
+                    <Button x:Name="ButtonProxy" Content="Use proxy ▸" Style="{StaticResource SecondaryButton}" Click="ButtonProxy_Click"/>
+                    <Button x:Name="ButtonPlain" Content="Plain colour" Style="{StaticResource SecondaryButton}" Click="ButtonPlain_Click"/>
+                    <Button x:Name="ButtonClear" Content="Clear override" Style="{StaticResource SecondaryButton}" Click="ButtonClear_Click"/>
+                    <Button x:Name="ButtonScan" Content="Scan a folder…" Style="{StaticResource PrimaryButton}" Height="32" Padding="14,0" Click="ButtonScan_Click"
+                            ToolTip="Looks for the missing images in a folder and its sub-folders, one stage at a time: exact names, then other extensions, then loose names."/>
+                </StackPanel>
+            </DockPanel>
+
+            <!-- Materials -->
+            <ListView x:Name="ListMaterials" SelectionMode="Extended" BorderBrush="{StaticResource CardBorder}"
+                      VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                      SelectionChanged="ListMaterials_SelectionChanged">
+                <ListView.View>
+                    <GridView>
+                        <GridViewColumn Header="" Width="76">
+                            <GridViewColumn.CellTemplate>
+                                <DataTemplate>
+                                    <Border Width="64" Height="64" Background="{Binding Swatch}" BorderBrush="#DADDE1" BorderThickness="1">
+                                        <Image Source="{Binding Thumbnail}" Stretch="UniformToFill"/>
+                                    </Border>
+                                </DataTemplate>
+                            </GridViewColumn.CellTemplate>
+                        </GridViewColumn>
+                        <GridViewColumn Header="Material" Width="230">
+                            <GridViewColumn.CellTemplate>
+                                <DataTemplate>
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                        <TextBlock Text="{Binding Detail}" FontSize="11" Foreground="#4B5560" TextTrimming="CharacterEllipsis"/>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </GridViewColumn.CellTemplate>
+                        </GridViewColumn>
+                        <GridViewColumn Header="Model" Width="110" DisplayMemberBinding="{Binding Model}"/>
+                        <GridViewColumn Header="Status" Width="190">
+                            <GridViewColumn.CellTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding Status}" Foreground="{Binding StatusBrush}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                </DataTemplate>
+                            </GridViewColumn.CellTemplate>
+                        </GridViewColumn>
+                        <GridViewColumn Header="Image" Width="380">
+                            <GridViewColumn.CellTemplate>
+                                <DataTemplate>
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding Source}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Source}"/>
+                                        <TextBlock Text="{Binding Location}" FontSize="11" Foreground="#4B5560" TextTrimming="CharacterEllipsis" ToolTip="{Binding Location}"/>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </GridViewColumn.CellTemplate>
+                        </GridViewColumn>
+                    </GridView>
+                </ListView.View>
+            </ListView>
+        </DockPanel>
+    </DockPanel>
+</Window>

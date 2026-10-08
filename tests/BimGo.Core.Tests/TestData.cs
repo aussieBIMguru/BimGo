@@ -76,7 +76,7 @@ namespace BimGo.Tests
         /// A two-element scene: a host wall (opaque) and a door inside a linked model (opaque + transparent),
         /// one level, one room, one link, a parameter table and a geo-located site.
         /// </summary>
-        public static SceneData BuildScene(LightingData lighting = null)
+        public static SceneData BuildScene(LightingData lighting = null, MaterialData materials = null)
         {
             // Three triangles: wall (0..2), door opaque (3..5), door glass (6..8)
             var vertices = new SceneVertex[9];
@@ -101,6 +101,7 @@ namespace BimGo.Tests
             return new SceneData
             {
                 Lighting = lighting ?? LightingData.Empty,
+                Materials = materials ?? MaterialData.Empty,
                 Vertices = vertices,
                 Indices = indices,
                 Elements = new[]
@@ -168,7 +169,7 @@ namespace BimGo.Tests
         /// A document holding <see cref="BuildScene"/> plus every optional part: comments, a three-entry journal,
         /// bookmarks with a home viewpoint and thumbnail, sun settings and visibility.
         /// </summary>
-        public static BimGoDocument BuildDocument(LightingData lighting = null)
+        public static BimGoDocument BuildDocument(LightingData lighting = null, MaterialData materials = null)
         {
             var journal = new EditJournal();
             journal.Add(new JournalEntry
@@ -189,7 +190,7 @@ namespace BimGo.Tests
 
             return new BimGoDocument
             {
-                Scene = BuildScene(lighting),
+                Scene = BuildScene(lighting, materials),
                 Comments = new CommentDocument
                 {
                     Model = "Test Model",

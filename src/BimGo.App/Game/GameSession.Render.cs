@@ -41,6 +41,7 @@ namespace BimGo.Game
             ("CTRL+S · Z · Y", "Save · Undo · Redo (files)"),
             ("F5", "Refresh from Revit (live sessions)"),
             ("TAB · ESC", "Minimap · Pause menu"),
+            ("U", "Hide the UI (Esc or U shows it)"),
             ("F11 · F12", "Fullscreen · Screenshot"),
             ("F1", "Hide help · BimGo " + Program.Version)
         };
@@ -67,12 +68,15 @@ namespace BimGo.Game
             // ---- Artificial lights for this frame (after the sun: daylight dims them), and their cached shadow maps
             UpdateArtificialLights();
             string lightShadowError = _renderer.UpdateLightShadows(_groupVisible, Dynamics, ShadowSceneKey());
-            if (lightShadowError != null) { Toast(lightShadowError, 6f); }
+            if (lightShadowError != null) { Toast(lightShadowError, 6f, important: true); }
 
             // ---- Ambient occlusion and glow: half-resolution geometry pre-pass, AO + blur, bloom source + blur
             bool glow = _renderer.Artificial.Bloom > 0f;
             string effectsError = _renderer.UpdateScreenEffects(Camera, width, height, _groupVisible, Dynamics, _groundZ, _ambientOcclusion, glow);
             if (effectsError != null) { OnScreenEffectsFailure(effectsError); }
+
+            // ---- Reflection probes: a couple of faces per frame until baked, re-baked a moment after things change
+            UpdateReflectionProbes();
 
             // ---- 3D scene into the (optionally multisampled) target
             _target.Ensure(width, height, _msaa);
@@ -93,6 +97,14 @@ namespace BimGo.Game
                 Planes = Camera.Planes,
                 Eye = Camera.Position,
                 Whitecard = _whitecard,
+                Realistic = _realistic,
+                Reflections = _reflections,
+                ReflectThreshold = _reflectThreshold / 100f,
+                ReflectGain = _reflectStrength,
+                ReflectDebug = _reflectDebug,
+                Probes = _reflectProbes,
+                Time = _clock,
+                Tint = _tintMode,
                 Plan = false,
                 ClipZ = new Vector2(-1e7f, 1e7f),
                 FogDensity = 0.0022f,
@@ -106,7 +118,8 @@ namespace BimGo.Game
             // Gun highlights (scan target, primed demolitions, gizmo target…)
             Gun active = _guns[_activeGun];
             _highlights.Clear();
-            if (!_paused) { active.CollectHighlights(_highlights); }
+            // Hidden UI: no tints either, unless a gun is in the middle of something (Gizmo / Clone holding an element)
+            if (!_paused && (!_uiHidden || active.CapturesInput)) { active.CollectHighlights(_highlights); }
             if (_highlights.Count > 0)
             {
                 Gl.Enable(Gl.BLEND);
@@ -130,11 +143,15 @@ namespace BimGo.Game
             // Bloom from glowing surfaces over everything (glass included)
             _renderer.CompositeGlow();
 
-            // Markers: depth-tested, then a faint x-ray copy so markers behind walls stay discoverable
-            _overlay.Begin(Camera);
-            for (int i = 0; i < _guns.Length; i++) { _guns[i].DrawWorld(_overlay, i == _activeGun); }
-            _overlay.Draw(Camera, depthTest: true, alpha: 1f, additive: false);
-            _overlay.Draw(Camera, depthTest: false, alpha: 0.16f, additive: false);
+            // Markers: depth-tested, then a faint x-ray copy so markers behind walls stay discoverable (none while the
+            // UI is hidden: clean views)
+            if (!_uiHidden)
+            {
+                _overlay.Begin(Camera);
+                for (int i = 0; i < _guns.Length; i++) { _guns[i].DrawWorld(_overlay, i == _activeGun); }
+                _overlay.Draw(Camera, depthTest: true, alpha: 1f, additive: false);
+                _overlay.Draw(Camera, depthTest: false, alpha: 0.16f, additive: false);
+            }
 
             _target.BlitToWindow();
             if (_thumbnailFor != null) { CaptureThumbnail(width, height); }
@@ -143,7 +160,7 @@ namespace BimGo.Game
             // ---- Window pass: minimap 3D, then all 2D UI in one batch
             Gl.Viewport(0, 0, width, height);
             float mapX = width - S(20) - S(220), mapY = S(20);
-            if (_showMap && !_paused) { DrawMinimapPlan(mapX + S(8), mapY + S(30), S(204), S(170)); }
+            if (_showMap && !_paused && !_uiHidden) { DrawMinimapPlan(mapX + S(8), mapY + S(30), S(204), S(170)); }
 
             if (_paused)
             {
@@ -151,7 +168,8 @@ namespace BimGo.Game
             }
             else
             {
-                BuildHud(mapX, mapY);
+                if (_uiHidden) { BuildHiddenHud(width); }
+                else { BuildHud(mapX, mapY); }
                 if (IsEditingComment) { BuildCommentEditor(); }
             }
             _ui.Flush(width, height);
@@ -168,7 +186,7 @@ namespace BimGo.Game
             _renderer.Artificial.Bloom = 0f;
             _renderer.DisableScreenEffects();
             Sound.Play(SoundId.Error);
-            Toast(reason, 6f);
+            Toast(reason, 6f, important: true);
         }
 
         /// <summary>
@@ -223,6 +241,8 @@ namespace BimGo.Game
                 Planes = _mapPlanes,
                 Eye = eye,
                 Whitecard = _whitecard,
+                Realistic = _realistic,
+                Tint = _tintMode,
                 Plan = true,
                 ClipZ = new Vector2(elevation - 0.3f, elevation + 1.2f),
                 FogDensity = 0f
@@ -369,6 +389,20 @@ namespace BimGo.Game
         }
 
         /// <summary>
+        /// The HUD in hide-UI mode (U): only the portal flash and important toasts (errors). The comment text box is
+        /// drawn by the caller as usual.
+        /// </summary>
+        private void BuildHiddenHud(int width)
+        {
+            if (_clock < _flashUntil)
+            {
+                float t = (_flashUntil - _clock) / MathF.Max(_flashLength, 0.01f);
+                _ui.Rect(0, 0, width, _window.Height, Rgba.WithAlpha(_flashColour, 0.35f * t));
+            }
+            if (_toastImportant) { BuildToast(_ui.Atlas, width); }
+        }
+
+        /// <summary>
         /// Top-left status: title, FPS, mode, level, ground, view.
         /// </summary>
         private void BuildStatusPanel(FontAtlas f)
@@ -439,7 +473,7 @@ namespace BimGo.Game
             rowY += row;
 
             _ui.Text(f.Body, labelX, rowY, "VIEW", UiTheme.TEXT_MUTED);
-            _ui.Text(f.Body, valueX, rowY, _whitecard ? "Whitecard" : "Material colour", UiTheme.TEXT);
+            _ui.Text(f.Body, valueX, rowY, ColourModeLabel(), UiTheme.TEXT);
         }
 
         /// <summary>

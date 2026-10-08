@@ -93,6 +93,26 @@ namespace BimGo.Game
         private bool _whitecard;
         private int _msaa;
         private bool _ambientOcclusion;
+
+        // Realistic colour mode (render colours and textures; falls back to material colours when the snapshot has
+        // no materials, but the choice is kept) and reflections (glass, mirrors, shiny surfaces, water)
+        private bool _realistic;
+        private bool _reflections;
+
+        // Reflections: lowest tier that reflects (25 or 50 %), strength multiplier, and the tier debug colours (not saved)
+        private int _reflectThreshold = 50;
+        private float _reflectStrength = 1f;
+
+        // Reflection probes (else the sky), probe resolution (256 = HQ), and the debug colours (0 off, 1 tiers,
+        // 2 probe cells; not saved)
+        private bool _reflectProbes = true;
+        private bool _probeHigh;
+        private int _reflectDebug;
+
+        // Realistic mode: how Revit's tint is drawn, and CC0 proxies for missing images (files made before proxies)
+        private TintMode _tintMode;
+        private bool _proxyMissing;
+        private bool _proxyMaterialColour;
         private float _fov;
         private float _sensitivity;
         private bool _invertY;
@@ -120,7 +140,12 @@ namespace BimGo.Game
         // Feedback
         private string _toast;
         private float _toastUntil;
+        private bool _toastImportant;
         private float _clock;
+
+        // Hide-UI mode (U): HUD, minimap, crosshair, markers and ordinary toasts hidden; every control still works.
+        // Esc or U shows the UI again. Not saved: each session starts with the UI shown.
+        private bool _uiHidden;
         private uint _flashColour;
         private float _flashUntil, _flashLength;
 
@@ -169,6 +194,15 @@ namespace BimGo.Game
 
             LaunchSettings settings = scene.Settings;
             _whitecard = settings.Colour == ColourMode.Whitecard;
+            _realistic = settings.Colour == ColourMode.Realistic;
+            _reflections = settings.Reflections;
+            _reflectThreshold = settings.ReflectionThreshold <= 37 ? 25 : 50;
+            _reflectStrength = float.IsFinite(settings.ReflectionStrength) ? Math.Clamp(settings.ReflectionStrength, 0.5f, 2f) : 1f;
+            _reflectProbes = settings.ReflectionProbes;
+            _probeHigh = settings.ProbeResolution >= 192;
+            _tintMode = settings.RevitTint == TintMode.Off ? TintMode.Off : TintMode.Multiply;
+            _proxyMissing = settings.ProxyMissingTextures;
+            _proxyMaterialColour = settings.ProxyMaterialColour;
             _msaa = settings.Msaa;
             _ambientOcclusion = settings.AmbientOcclusion;
             _fov = settings.FieldOfView;
@@ -210,8 +244,14 @@ namespace BimGo.Game
             Utilities.Log_Utils.Write($"Batches {_batches.Batches.Length} / chunks {_batches.Chunks.Length}, BVH nodes {_bvh.NodeCount} in {stopwatch.ElapsedMilliseconds} ms. GL {_window.GlVersion}: {Native.Gl.GetString(Native.Gl.RENDERER)}");
 
             DrawLoadingFrame("Uploading geometry…");
-            _renderer = new SceneRenderer();
+            _renderer = new SceneRenderer { AutoProxy = _proxyMissing, ProxyMaterialColour = _proxyMaterialColour };
             _renderer.Initialise(Scene, _batches);
+            InitialiseTextures();
+            if (_renderer.MaterialWarning != null) { Toast(_renderer.MaterialWarning, 6f); }
+            else if (_realistic && !_renderer.HasMaterials)
+            {
+                Toast("Realistic needs textures: this snapshot shows material colours. Tick “Extract materials and textures” at Go.", 6f);
+            }
             _overlay.Initialise();
             _target.Ensure(_window.Width, _window.Height, _msaa);
 
@@ -523,11 +563,18 @@ namespace BimGo.Game
             Gun current = _guns[_activeGun];
             bool captured = !_paused && current.CapturesInput;
 
-            // Global keys
-            if (input.IsPressed(Vk.VK_ESCAPE))
+            // Global keys. While the UI is hidden, Esc only brings it back (even when a gun has the keys); the next
+            // Esc cancels the gun or pauses as usual.
+            bool escape = input.IsPressed(Vk.VK_ESCAPE);
+            if (escape && _uiHidden)
+            {
+                ShowUi();
+                escape = false;
+            }
+            if (escape)
             {
                 if (captured) { current.OnCancel(); }
-                else if (_paused && (ClosePush() || CloseComments() || CloseBookmarks())) { /* back to the pause menu */ }
+                else if (_paused && (ClosePush() || CloseComments() || CloseBookmarks() || CloseTextures())) { /* back to the pause menu */ }
                 else { SetPaused(!_paused); }
             }
             if (input.IsPressed(Vk.VK_F1)) { _showHelp = !_showHelp; }
@@ -569,6 +616,9 @@ namespace BimGo.Game
                 }
             }
             if (_paused) { return; }
+
+            // Hide-UI mode (works while a gun has the movement keys too: none of them uses U)
+            if (input.IsPressed('U')) { ToggleUiHidden(); }
 
             UpdateRoom();
 
@@ -738,6 +788,7 @@ namespace BimGo.Game
         private void SetPaused(bool paused)
         {
             _paused = paused;
+            if (paused) { ShowUi(); } // e.g. focus lost while hidden: come back to a normal HUD
             _window.SetCaptured(!paused && _window.IsActive && !_sunPanelOpen);
             _window.Input.ReleaseAll();
         }
@@ -754,7 +805,7 @@ namespace BimGo.Game
             _homeSetUntil = _clock + 2f;
             Sound.Play(SoundId.Commit);
             Flash(UiTheme.BOOKMARK, 0.2f);
-            if (Bookmarks?.LastError != null) { Toast(Bookmarks.LastError, 4f); }
+            if (Bookmarks?.LastError != null) { Toast(Bookmarks.LastError, 4f, important: true); }
             else if (IsFileMode) { Toast("Home set here: H returns here, and this file opens here once saved (Ctrl+S)", 3.5f); }
             else { Toast("Home set here: H returns here, and this model opens here next time", 3.5f); }
         }
@@ -810,10 +861,45 @@ namespace BimGo.Game
         /// <summary>
         /// Shows a short message at the top of the screen.
         /// </summary>
-        public void Toast(string message, float seconds = 2.6f)
+        /// <param name="message">The text.</param>
+        /// <param name="seconds">How long it stays.</param>
+        /// <param name="important">True for errors and failures: shown even while the UI is hidden (U).</param>
+        public void Toast(string message, float seconds = 2.6f, bool important = false)
         {
+            // While the UI is hidden an ordinary message is dropped, so it can't replace an error still showing
+            if (_uiHidden && !important) { return; }
             _toast = message;
             _toastUntil = _clock + seconds;
+            _toastImportant = important;
+        }
+
+        /// <summary>True while hide-UI mode is on (U).</summary>
+        public bool IsUiHidden => _uiHidden;
+
+        /// <summary>
+        /// U: hides or shows the UI. Entering says how to get it back.
+        /// </summary>
+        private void ToggleUiHidden()
+        {
+            if (_uiHidden)
+            {
+                ShowUi();
+                return;
+            }
+            _uiHidden = true;
+            Sound.Play(SoundId.UiClick);
+            Toast("UI hidden · Esc or U to show it", 1.8f, important: true);
+        }
+
+        /// <summary>
+        /// Leaves hide-UI mode (Esc, U, the pause menu, the sun panel).
+        /// </summary>
+        private void ShowUi()
+        {
+            if (!_uiHidden) { return; }
+            _uiHidden = false;
+            _toast = null;
+            Sound.Play(SoundId.UiClick);
         }
 
         /// <summary>
@@ -861,7 +947,15 @@ namespace BimGo.Game
         private void SaveSettings()
         {
             LaunchSettings settings = LaunchSettings.LoadOrDefault();
-            settings.Colour = _whitecard ? ColourMode.Whitecard : ColourMode.Material;
+            settings.Colour = _whitecard ? ColourMode.Whitecard : _realistic ? ColourMode.Realistic : ColourMode.Material;
+            settings.Reflections = _reflections;
+            settings.ReflectionThreshold = _reflectThreshold;
+            settings.ReflectionStrength = _reflectStrength;
+            settings.ReflectionProbes = _reflectProbes;
+            settings.ProbeResolution = _probeHigh ? 256 : 128;
+            settings.RevitTint = _tintMode;
+            settings.ProxyMissingTextures = _proxyMissing;
+            settings.ProxyMaterialColour = _proxyMaterialColour;
             settings.Msaa = _msaa;
             settings.AmbientOcclusion = _ambientOcclusion;
             settings.ArtificialLights = _lightMode;

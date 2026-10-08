@@ -190,7 +190,7 @@ namespace BimGo.Game
         {
             if (_visibilitySidecarPath == null || _sidecarVisibilityRevision == _visibilityRevision) { return; }
             _sidecarVisibilityRevision = _visibilityRevision;
-            if (!VisibilityFiles.Write(_visibilitySidecarPath, ToVisibilitySettings(), out string error)) { Toast(error, 4f); }
+            if (!VisibilityFiles.Write(_visibilitySidecarPath, ToVisibilitySettings(), out string error)) { Toast(error, 4f, important: true); }
         }
 
         #endregion
@@ -224,7 +224,7 @@ namespace BimGo.Game
             if (dynamicId > 0)
             {
                 Sound.Play(SoundId.Error);
-                Toast("Moved or cloned elements can't be hidden: demolish the clone, or undo the move");
+                Toast("Moved or cloned elements can't be hidden: demolish the clone, or undo the move", important: true);
                 return;
             }
 

@@ -30,7 +30,9 @@ namespace BimGo.Game
         public bool IsEmbedded => _path == null;
 
         /// <summary>Where comments are kept (for the HUD).</summary>
-        public string FileName => IsEmbedded ? "this file" : Path.GetFileName(_path);
+        public string FileName => IsEmbedded ? "this file"
+            : ModelFolders.FolderOf(_path) != null ? "BimGo's folder for this model"
+            : Path.GetFileName(_path);
 
         /// <summary>Incremented on every change (dirty tracking for embedded comments).</summary>
         public int Revision { get; private set; }

@@ -90,7 +90,7 @@ namespace BimGo.Game
 
             while (_live.TryTakeNotice(out string notice))
             {
-                if (!string.IsNullOrEmpty(notice)) { Toast(notice, 4f); }
+                if (!string.IsNullOrEmpty(notice)) { Toast(notice, 4f, important: true); }
             }
 
             if (_live.SnapshotReady && !_endRequested && !_reloadAnnounced)
@@ -115,7 +115,7 @@ namespace BimGo.Game
             }
             if (!_live.Connected)
             {
-                Toast("Not connected to Revit");
+                Toast("Not connected to Revit", important: true);
                 return;
             }
             if (EditsPending > 0)
@@ -151,7 +151,7 @@ namespace BimGo.Game
             }
             if (!_live.Connected)
             {
-                Toast("Not connected to Revit");
+                Toast("Not connected to Revit", important: true);
                 return;
             }
 

@@ -28,6 +28,12 @@ namespace BimGo.Format
         /// <summary>What the walkthrough hides (categories, links, elements), or null if nothing.</summary>
         public VisibilitySettings Visibility { get; init; }
 
+        /// <summary>
+        /// The materials as changed in the walkthrough (Textures panel: picked images, scan hits, proxies), or null to
+        /// write the scene's own (<see cref="SceneData.Materials"/>). The scene snapshot itself stays immutable.
+        /// </summary>
+        public MaterialData Materials { get; set; }
+
         /// <summary>When the geometry was extracted (UTC); kept across saves.</summary>
         public DateTime CreatedUtc { get; init; }
 

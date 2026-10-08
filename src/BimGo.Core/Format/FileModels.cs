@@ -327,4 +327,24 @@ namespace BimGo.Format
     }
 
     #endregion
+
+    #region materials.json
+
+    /// <summary>
+    /// materials.json: the material table for Realistic mode (optional; older readers ignore it). The per-vertex
+    /// material index and surface coordinates are in material.bin; the images under textures/.
+    /// </summary>
+    public sealed class MaterialsDto
+    {
+        /// <summary>Entry layout version.</summary>
+        public int Version { get; set; } = 1;
+
+        /// <summary>The size cap the textures were stored at (longest side, px).</summary>
+        public int TextureMaxSize { get; set; } = 512;
+
+        /// <summary>The materials, in index order.</summary>
+        public List<SceneMaterial> Materials { get; set; } = new();
+    }
+
+    #endregion
 }

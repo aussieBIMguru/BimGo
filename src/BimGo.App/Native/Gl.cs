@@ -58,6 +58,11 @@ namespace BimGo.Native
         public const uint RGBA16F = 0x881A, COLOR_ATTACHMENT1 = 0x8CE1;
         public const uint DEPTH_COMPONENT16 = 0x81A5, UNSIGNED_SHORT = 0x1403;
 
+        // Material textures (mipmapped colour arrays, wrap, anisotropy via GL_EXT_texture_filter_anisotropic / GL 4.6)
+        public const uint REPEAT = 0x2901, LINEAR_MIPMAP_LINEAR = 0x2703, TEXTURE_MAX_LEVEL = 0x813D;
+        public const uint TEXTURE_MAX_ANISOTROPY = 0x84FE, MAX_TEXTURE_MAX_ANISOTROPY = 0x84FF;
+        public const uint MAX_ARRAY_TEXTURE_LAYERS = 0x88FF, MAX_TEXTURE_SIZE = 0x0D33;
+
         #endregion
 
         #region Loading
@@ -77,7 +82,7 @@ namespace BimGo.Native
             "glReadBuffer", "glReadPixels",
 
             // GL 1.3+
-            "glActiveTexture", "glMultiDrawElements", "glBlendFuncSeparate", "glTexImage3D",
+            "glActiveTexture", "glMultiDrawElements", "glBlendFuncSeparate", "glTexImage3D", "glTexSubImage3D", "glGenerateMipmap",
 
             // Buffers and vertex arrays
             "glGenBuffers", "glDeleteBuffers", "glBindBuffer", "glBufferData", "glBufferSubData",
@@ -206,6 +211,13 @@ namespace BimGo.Native
 
         public static void TexImage3D(uint target, int level, uint internalFormat, int width, int height, int depth, uint format, uint type, void* pixels)
             => _gl.TexImage3D((GLEnum)target, level, (int)internalFormat, (uint)width, (uint)height, (uint)depth, 0, (GLEnum)format, (GLEnum)type, pixels);
+
+        public static void TexSubImage3D(uint target, int level, int x, int y, int z, int width, int height, int depth, uint format, uint type, void* pixels)
+            => _gl.TexSubImage3D((GLEnum)target, level, x, y, z, (uint)width, (uint)height, (uint)depth, (GLEnum)format, (GLEnum)type, pixels);
+
+        public static void GenerateMipmap(uint target) => _gl.GenerateMipmap((GLEnum)target);
+
+        public static void TexParameter(uint target, uint name, float value) => _gl.TexParameter((GLEnum)target, (GLEnum)name, value);
 
         #endregion
 

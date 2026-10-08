@@ -131,7 +131,7 @@ namespace BimGo.Game.Guns
             if (!_valid)
             {
                 Session.Sound.Play(SoundId.Error);
-                if (_reason != null) { Session.Toast(_reason); }
+                if (_reason != null) { Session.Toast(_reason, important: true); }
                 return;
             }
 

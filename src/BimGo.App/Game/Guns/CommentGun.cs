@@ -95,7 +95,7 @@ namespace BimGo.Game.Guns
 
         private void ReportSaveError()
         {
-            if (Session.Comments.LastError != null) { Session.Toast(Session.Comments.LastError); }
+            if (Session.Comments.LastError != null) { Session.Toast(Session.Comments.LastError, important: true); }
         }
 
         /// <summary>

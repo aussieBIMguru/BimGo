@@ -46,6 +46,31 @@ namespace BimGo.Platform
         }
 
         /// <summary>
+        /// Shows a folder picker (the modern Explorer-style dialog).
+        /// </summary>
+        /// <returns>The chosen folder, or null if cancelled.</returns>
+        public static string ShowFolder(nint owner, string description, string initialFolder)
+        {
+            try
+            {
+                using var dialog = new WinForms.FolderBrowserDialog
+                {
+                    Description = description ?? string.Empty,
+                    UseDescriptionForTitle = true,
+                    ShowNewFolderButton = false,
+                    AutoUpgradeEnabled = true
+                };
+                if (!string.IsNullOrEmpty(initialFolder) && Directory.Exists(initialFolder)) { dialog.InitialDirectory = initialFolder; }
+                return dialog.ShowDialog(new Owner(owner)) == WinForms.DialogResult.OK ? dialog.SelectedPath : null;
+            }
+            catch (Exception ex)
+            {
+                Utilities.Log_Utils.Write($"Folder dialog failed: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
         /// Shows a Save dialog (asks before overwriting).
         /// </summary>
         /// <returns>The chosen path, or null if cancelled.</returns>

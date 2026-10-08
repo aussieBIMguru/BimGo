@@ -54,8 +54,31 @@ namespace BimGo.Scene
         /// <summary>Greyscale study-model look.</summary>
         Whitecard = 0,
 
-        /// <summary>Material colours cached from Revit.</summary>
-        Material = 1
+        /// <summary>Material colours cached from Revit (the shading colour, as Revit's Shaded view).</summary>
+        Material = 1,
+
+        /// <summary>
+        /// Render colours and textures from the appearance assets (as Revit's Realistic view). Needs a snapshot taken
+        /// with <see cref="LaunchSettings.ExtractTextures"/>; without one the walkthrough shows material colours.
+        /// </summary>
+        Realistic = 2
+    }
+
+    /// <summary>
+    /// How Revit's tint is drawn in the Realistic colour mode (<see cref="LaunchSettings.RevitTint"/>).
+    /// </summary>
+    public enum TintMode
+    {
+        /// <summary>Revit tint ignored.</summary>
+        Off = 0,
+
+        /// <summary>The image (and, for an appearance tint, the colour) multiplied by the tint colour in linear light:
+        /// Revit's own blend (confirmed against Realistic view on a tint test model).</summary>
+        Multiply = 1,
+
+        /// <summary>Build B trial value (hue at the image's lightness), dropped once Multiply was confirmed: read as
+        /// <see cref="Multiply"/> (kept so a settings file that has it still reads).</summary>
+        KeepLightness = 2
     }
 
     /// <summary>
@@ -93,6 +116,83 @@ namespace BimGo.Scene
 
         /// <summary>Colour mode at launch.</summary>
         public ColourMode Colour { get; set; } = ColourMode.Whitecard;
+
+        /// <summary>
+        /// Extract materials and textures at Go / Export (off by default: the model stays light). Embeds each
+        /// material's colour texture (size-capped by <see cref="TextureMaxSize"/>) and per-vertex surface coordinates,
+        /// for the Realistic colour mode.
+        /// </summary>
+        public bool ExtractTextures { get; set; }
+
+        /// <summary>Texture size cap at extraction (longest side, px): one of <see cref="MaterialData.TEXTURE_SIZES"/>.</summary>
+        public int TextureMaxSize { get; set; } = 512;
+
+        /// <summary>Reflections in the Realistic colour mode: glass, mirrors and shiny surfaces (on by default).</summary>
+        public bool Reflections { get; set; } = true;
+
+        /// <summary>
+        /// Lowest reflection tier that reflects (%): 50 = shiny things only (the default), 25 = also satin and semi-gloss
+        /// surfaces. Glass and water always reflect while <see cref="Reflections"/> is on.
+        /// </summary>
+        public int ReflectionThreshold { get; set; } = 50;
+
+        /// <summary>Reflection strength multiplier (0.5–2, 1 = default).</summary>
+        public float ReflectionStrength { get; set; } = 1f;
+
+        /// <summary>
+        /// Reflections read reflection probes (captures of the rooms around reflective surfaces) where there are any;
+        /// false = the sky only (cheaper). On by default.
+        /// </summary>
+        public bool ReflectionProbes { get; set; } = true;
+
+        /// <summary>Probe face size in px, per machine: 128 (default) or 256 ("Probes HQ": sharper, fewer probes fit).</summary>
+        public int ProbeResolution { get; set; } = 128;
+
+        /// <summary>
+        /// Revit's tint (appearance and bitmap "Tint") in the Realistic colour mode: <see cref="TintMode.Multiply"/>
+        /// (Revit's blend, the default) or <see cref="TintMode.Off"/>.
+        /// </summary>
+        public TintMode RevitTint { get; set; } = TintMode.Multiply;
+
+        /// <summary>
+        /// Draw a CC0 proxy texture (by material name, then schema) for materials whose image is missing or unreadable
+        /// (on by default). Plain-colour materials are left alone unless the user assigns a proxy.
+        /// </summary>
+        public bool ProxyMissingTextures { get; set; } = true;
+
+        /// <summary>
+        /// Proxy textures take the material's own colour (the image's pattern and shading, the material's hue), so a
+        /// white vinyl stays white whatever colour the pack's vinyl is. On by default; off shows the pack's colours.
+        /// </summary>
+        public bool ProxyMaterialColour { get; set; } = true;
+
+        /// <summary>
+        /// Folders searched (by exact file name, recursively) for textures Revit can't find, for every model. Added
+        /// from the "Review textures…" window or the app's Textures panel ("Remember this folder").
+        /// </summary>
+        public List<string> TextureSearchFolders { get; set; } = new();
+
+        /// <summary>Most remembered texture search folders.</summary>
+        public const int MAX_TEXTURE_SEARCH_FOLDERS = 20;
+
+        /// <summary>
+        /// Remembers a texture search folder (moved to the end if already there; the oldest drops off past the limit).
+        /// </summary>
+        /// <returns>True if the list changed.</returns>
+        public bool AddTextureSearchFolder(string folder)
+        {
+            if (string.IsNullOrWhiteSpace(folder)) { return false; }
+            string clean = folder.Trim().TrimEnd('\\', '/');
+            TextureSearchFolders ??= new List<string>();
+            if (TextureSearchFolders.Count > 0 && string.Equals(TextureSearchFolders[^1], clean, StringComparison.OrdinalIgnoreCase)) { return false; }
+            TextureSearchFolders.RemoveAll(f => string.Equals(f, clean, StringComparison.OrdinalIgnoreCase));
+            TextureSearchFolders.Add(clean);
+            if (TextureSearchFolders.Count > MAX_TEXTURE_SEARCH_FOLDERS)
+            {
+                TextureSearchFolders.RemoveRange(0, TextureSearchFolders.Count - MAX_TEXTURE_SEARCH_FOLDERS);
+            }
+            return true;
+        }
 
         /// <summary>MSAA samples (0, 2 or 4).</summary>
         public int Msaa { get; set; } = 0;
@@ -213,6 +313,22 @@ namespace BimGo.Scene
         /// <summary>Shadow-map quality on this machine (the sun panel and the Options dialog change it).</summary>
         public ShadowQuality ShadowQuality { get; set; } = ShadowQuality.Medium;
 
+        /// <summary>
+        /// The quality profile last chosen on this machine (pause menu or Options window), or Custom after a manual
+        /// change. Kept in step with the values it governs (<see cref="QualityProfiles.Detect"/> on load).
+        /// </summary>
+        public QualityProfile QualityProfile { get; set; } = QualityProfile.Custom;
+
+        /// <summary>
+        /// Also write a live session's comments, bookmarks, sun and visibility beside the Revit model when its folder is
+        /// writable (and take newer copies from there at Go), so colleagues on a shared drive see them. Off: they live
+        /// only in BimGo's per-model folder (<see cref="Format.ModelFolders"/>).
+        /// </summary>
+        public bool SidecarsBesideModel { get; set; }
+
+        /// <summary>The Options window's last tab (0 Load … 6 Player).</summary>
+        public int LastOptionsTab { get; set; }
+
         /// <summary>The walkthrough's coordinate readout (L cycles it; remembered between sessions).</summary>
         public CoordinateReadout CoordinateReadout { get; set; } = CoordinateReadout.Off;
 
@@ -303,12 +419,23 @@ namespace BimGo.Scene
         }
 
         /// <summary>
+        /// A deep copy (through the same JSON the settings file uses), e.g. to try the Options window's unsaved choices.
+        /// </summary>
+        public LaunchSettings Clone()
+        {
+            LaunchSettings copy = JsonSerializer.Deserialize<LaunchSettings>(JsonSerializer.Serialize(this, JSON_OPTIONS), JSON_OPTIONS) ?? new LaunchSettings();
+            copy.Sanitise();
+            return copy;
+        }
+
+        /// <summary>
         /// Saves the settings. Failures are logged, never thrown.
         /// </summary>
         public void Save()
         {
             try
             {
+                QualityProfile = QualityProfiles.Detect(this); // whoever saved, the profile matches the values
                 Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath));
                 string temp = SettingsPath + ".tmp";
                 File.WriteAllText(temp, JsonSerializer.Serialize(this, JSON_OPTIONS));
@@ -348,8 +475,23 @@ namespace BimGo.Scene
             if (!Enum.IsDefined(CoordinateReadout)) { CoordinateReadout = CoordinateReadout.Off; }
             if (!Enum.IsDefined(ShadowQuality)) { ShadowQuality = ShadowQuality.Medium; }
             if (!Enum.IsDefined(ArtificialLights)) { ArtificialLights = ArtificialLightMode.Lights; }
+            if (!Enum.IsDefined(Colour)) { Colour = ColourMode.Material; }
+            TextureMaxSize = MaterialData.NearestTextureSize(TextureMaxSize);
+            if (RevitTint != TintMode.Off) { RevitTint = TintMode.Multiply; } // unknown and retired values
+            TextureSearchFolders = (TextureSearchFolders ?? new List<string>())
+                .Where(f => !string.IsNullOrWhiteSpace(f))
+                .Select(f => f.Trim().TrimEnd('\\', '/'))
+                .Where(f => f.Length > 0)
+                .Reverse()
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(MAX_TEXTURE_SEARCH_FOLDERS)
+                .Reverse()
+                .ToList();
             ArtificialLightIntensity = float.IsFinite(ArtificialLightIntensity) ? Math.Clamp(ArtificialLightIntensity, 0f, 2f) : 1f;
             BloomIntensity = float.IsFinite(BloomIntensity) ? Math.Clamp(BloomIntensity, 0f, 2f) : 1f;
+            ReflectionThreshold = ReflectionThreshold <= 37 ? 25 : 50;
+            ReflectionStrength = float.IsFinite(ReflectionStrength) ? Math.Clamp(ReflectionStrength, 0.5f, 2f) : 1f;
+            ProbeResolution = ProbeResolution >= 192 ? 256 : 128;
             EmissiveKeywords = (EmissiveKeywords ?? DefaultEmissiveKeywords())
                 .Where(k => !string.IsNullOrWhiteSpace(k))
                 .Select(k => k.Trim())
@@ -363,6 +505,11 @@ namespace BimGo.Scene
             MaxStepHeightMm = Math.Clamp(MaxStepHeightMm, 50f, 450f);
             SnapMoveMm = NearestStep(SNAP_MOVE_STEPS_MM, SnapMoveMm);
             SnapAngleDeg = NearestStep(SNAP_ANGLE_STEPS_DEG, SnapAngleDeg);
+
+            LastOptionsTab = Math.Clamp(LastOptionsTab, 0, 6);
+
+            // Last: the profile is whatever the (clamped) values match, so a hand-edited or older file reads true
+            QualityProfile = QualityProfiles.Detect(this);
         }
 
         #endregion

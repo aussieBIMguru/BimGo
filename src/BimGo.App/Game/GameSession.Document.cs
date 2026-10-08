@@ -41,7 +41,8 @@ namespace BimGo.Game
 
         /// <summary>True if a standalone file has edits, comments or bookmarks that are not saved yet.</summary>
         public bool IsDirty => IsFileMode && Comments != null && Bookmarks != null &&
-            (_journal.Revision != _savedJournalRevision || Comments.Revision != _savedCommentRevision || Bookmarks.Revision != _savedBookmarkRevision || SunDirty || VisibilityDirty);
+            (_journal.Revision != _savedJournalRevision || Comments.Revision != _savedCommentRevision || Bookmarks.Revision != _savedBookmarkRevision || SunDirty || VisibilityDirty
+             || _materialsRevision != _savedMaterialsRevision);
 
         /// <summary>The document's display name (file name, or the Revit model title).</summary>
         public string DocumentName => IsFileMode && !string.IsNullOrEmpty(DocumentPath) ? Path.GetFileName(DocumentPath) : Scene.ModelTitle;
@@ -52,6 +53,7 @@ namespace BimGo.Game
         private void MarkSaved()
         {
             _savedJournalRevision = _journal.Revision;
+            _savedMaterialsRevision = _materialsRevision;
             _savedCommentRevision = Comments?.Revision ?? 0;
             _savedBookmarkRevision = Bookmarks?.Revision ?? 0;
             _savedSunRevision = _sunRevision;
@@ -360,7 +362,7 @@ namespace BimGo.Game
             if (!applied)
             {
                 Sound.Play(SoundId.Error);
-                Toast("Redone in the file, but its element is not in this walkthrough", 4f);
+                Toast("Redone in the file, but its element is not in this walkthrough", 4f, important: true);
                 return;
             }
             Sound.Play(SoundId.Commit);
@@ -401,6 +403,7 @@ namespace BimGo.Game
                 Bookmarks = Bookmarks.ToDocument(),
                 Sun = _sun?.Copy(),
                 Visibility = ToVisibilitySettings(),
+                Materials = MaterialsChanged ? CurrentMaterials : null, // Textures panel: picked images are embedded
                 CreatedUtc = _options.Document?.CreatedUtc ?? Scene.Provenance?.ExtractedUtc ?? DateTime.UtcNow,
                 Path = path
             };
@@ -417,7 +420,7 @@ namespace BimGo.Game
             {
                 bool cancelled = progress.CancelRequested;
                 Sound.Play(cancelled ? SoundId.UiClick : SoundId.Error);
-                Toast(cancelled ? "Save cancelled: the file on disk was not changed." : $"The model could not be saved: {error}", 5f);
+                Toast(cancelled ? "Save cancelled: the file on disk was not changed." : $"The model could not be saved: {error}", 5f, important: !cancelled);
                 return false;
             }
 

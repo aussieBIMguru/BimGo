@@ -103,7 +103,7 @@ namespace BimGo.Game.Guns
             {
                 _primed.Remove(target);
                 Session.Sound.Play(SoundId.Error);
-                Session.Toast($"{hit.MoveBlockReason ?? "In a linked model"}: edit it in its own model.", 3.5f);
+                Session.Toast($"{hit.MoveBlockReason ?? "In a linked model"}: edit it in its own model.", 3.5f, important: true);
                 return;
             }
 
@@ -113,7 +113,7 @@ namespace BimGo.Game.Guns
             {
                 _primed.Remove(target);
                 Session.Sound.Play(SoundId.Error);
-                Session.Toast($"{blocked}, so it can't be demolished. Press T to delete it instead.", 3.5f);
+                Session.Toast($"{blocked}, so it can't be demolished. Press T to delete it instead.", 3.5f, important: true);
                 return;
             }
 
@@ -217,7 +217,7 @@ namespace BimGo.Game.Guns
             if (instance != null) { instance.Hidden = false; }
             else { Session.SetStaticHidden(target.Element, false); }
             Session.Sound.Play(SoundId.Error);
-            Session.Toast($"{Session.EditTargetName} refused ({result.Message}). {record.Name} restored.", 4f);
+            Session.Toast($"{Session.EditTargetName} refused ({result.Message}). {record.Name} restored.", 4f, important: true);
         }
 
         #endregion

@@ -235,7 +235,7 @@ namespace BimGo.Game
         {
             if (_sunSidecarPath == null || _sidecarSunRevision == _sunRevision) { return; }
             _sidecarSunRevision = _sunRevision;
-            if (!SunFiles.Write(_sunSidecarPath, _sun, out string error)) { Toast(error, 4f); }
+            if (!SunFiles.Write(_sunSidecarPath, _sun, out string error)) { Toast(error, 4f, important: true); }
         }
 
         /// <summary>
@@ -274,7 +274,7 @@ namespace BimGo.Game
             _sunPlaying = false;
             SunChanged();
             Sound.Play(SoundId.Error);
-            Toast(reason, 6f);
+            Toast(reason, 6f, important: true);
         }
 
         #endregion
@@ -287,6 +287,7 @@ namespace BimGo.Game
         private void OpenSunPanel()
         {
             if (_sunPanelOpen) { return; }
+            ShowUi(); // the panel is UI: Shift+O while hidden brings everything back
             _sunPanelOpen = true;
             _sunField = 0;
             _window.SetCaptured(false);
@@ -542,7 +543,7 @@ namespace BimGo.Game
             IntensitySlider(f, input, SLIDER_GLASS, ix, cy, iw, "Light through glass", _sun.GlassTransmission, 2f);
             cy += S(54);
 
-            // Artificial lights (saved with the settings, not the model)
+            // Artificial lights (saved with the settings, not the model). Reflections live in the pause menu.
             cy += BuildLightControls(f, input, ix, cy, iw);
 
             if (SmallButton(f, input, ix, cy, S(150), S(28), "RESET LIGHTING"))

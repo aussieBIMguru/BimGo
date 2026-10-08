@@ -65,7 +65,9 @@ namespace BimGo.Extraction
         /// <param name="Colour">RGBA8 colour (transparency in alpha).</param>
         /// <param name="SelfIllumination">Packed glow from the appearance asset, or 0.</param>
         /// <param name="Keyword">True if the name contains an emissive keyword (counts inside lighting fixtures only).</param>
-        private readonly record struct MaterialLook(uint Colour, uint SelfIllumination, bool Keyword);
+        /// <param name="Material">The material's index in the Realistic-mode table (<see cref="MaterialData.NONE"/> when
+        /// textures aren't extracted or there is no material).</param>
+        private readonly record struct MaterialLook(uint Colour, uint SelfIllumination, bool Keyword, ushort Material);
 
         #region Per element
 

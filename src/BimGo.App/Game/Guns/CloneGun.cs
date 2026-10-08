@@ -71,7 +71,7 @@ namespace BimGo.Game.Guns
             if (!record.Movable)
             {
                 Session.Sound.Play(SoundId.Error);
-                Session.Toast($"Can't clone {record.Name}: {record.MoveBlockReason}");
+                Session.Toast($"Can't clone {record.Name}: {record.MoveBlockReason}", important: true);
                 return;
             }
 
@@ -148,7 +148,7 @@ namespace BimGo.Game.Guns
 
                 Session.Dynamics.Remove(clone);
                 Session.Sound.Play(SoundId.Error);
-                Session.Toast($"{Session.EditTargetName} refused the copy ({result.Message}). Clone removed.", 4f);
+                Session.Toast($"{Session.EditTargetName} refused the copy ({result.Message}). Clone removed.", 4f, important: true);
             });
 
             if (!sent) { Session.Toast($"Clone of {record.Name} kept in the walkthrough only (not connected to Revit)"); }

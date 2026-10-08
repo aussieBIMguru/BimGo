@@ -4,7 +4,8 @@ using System.Text.Json;
 namespace BimGo.Format
 {
     /// <summary>
-    /// Shared read / atomic write for the small JSON sidecars kept beside a Revit model (bookmarks, sun). Same JSON
+    /// Shared read / atomic write for the small JSON sidecars of a Revit model (bookmarks, sun, visibility), kept in
+    /// its BimGo model folder (<see cref="ModelFolders"/>) or, for older snapshots, beside the model. Same JSON
     /// settings as the entries inside a .bimgo. Never throws.
     /// </summary>
     internal static class SidecarJson
@@ -15,6 +16,12 @@ namespace BimGo.Format
         public static string BesideComments(string commentsSidecarPath, string suffix)
         {
             if (string.IsNullOrWhiteSpace(commentsSidecarPath)) { return null; }
+
+            // In a per-model folder the files have fixed names (comments.json → bookmarks.json, sun.json…)
+            string modelFolder = ModelFolders.FolderOf(commentsSidecarPath);
+            string folderFile = modelFolder == null ? null : ModelFolders.FileForSuffix(suffix);
+            if (folderFile != null) { return Path.Combine(modelFolder, folderFile); }
+
             string basePath = commentsSidecarPath.EndsWith(BimGoFormat.SIDECAR_SUFFIX, StringComparison.OrdinalIgnoreCase)
                 ? commentsSidecarPath[..^BimGoFormat.SIDECAR_SUFFIX.Length]
                 : Path.Combine(Path.GetDirectoryName(commentsSidecarPath) ?? string.Empty, Path.GetFileNameWithoutExtension(commentsSidecarPath));
@@ -57,6 +64,7 @@ namespace BimGo.Format
                 string temp = path + ".tmp";
                 File.WriteAllText(temp, JsonSerializer.Serialize(value, BimGoFormat.JSON_INDENTED));
                 File.Move(temp, path, overwrite: true);
+                ModelFolders.MirrorAfterWrite(path);
                 return true;
             }
             catch (Exception ex)

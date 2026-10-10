@@ -1,6 +1,6 @@
 # BimGo — First-Person BIM Walkthroughs
 
-BimGo (formerly **RvtGo**) turns a Revit model into an FPS-style, first-person walkthrough: collision, gravity, walkable stairs, a room readout and nine tool guns (**Scan**, **Measure**, **Portal**, **Comment**, **Teleport**, **Demolish**, **Gizmo**, **Clone**, **Place**). It renders with its own small OpenGL engine (own renderer, window and input; GL function bindings from Silk.NET). Personal project of Gavin, publisher **Aussie BIM Guru**, MIT licence.
+BimGo (formerly **RvtGo**) turns a Revit model into an FPS-style, first-person walkthrough: collision, gravity, walkable stairs, a room readout and nine tool guns (**Scan**, **Measure**, **Portal**, **Comment**, **Teleport**, **Demolish**, **Gizmo**, **Clone**, **Place**). It renders with its own small OpenGL engine (own renderer, window and input; GL function bindings from Silk.NET). Personal project of Gavin, publisher **Aussie BIM Guru**, **MIT No Attribution (MIT-0)** licence: use it for anything, no credit required, no warranty.
 
 Two parts:
 
@@ -289,10 +289,11 @@ Every round's handoff and build notes live in `ai/<yymmdd>_<round>/`. Same-day f
 | 2026-10-10 | BCF, sun hours 2 (`261010a_BCF_SunHours`) | Build A: BCF 2.1 export / import of comments (merge by GUID, shared / project / internal viewpoints), comment pictures, IFC GUIDs; sun hours pass / fail, saved studies, wall cells for rooms bounded at wall centres. Build B: study modes daylight factor and illuminance (lux), general PASS / FAIL toggle (regional presets removed) |
 | 2026-10-10 | Section box (`261010b_SectionBox`) | Section box + quick plane (P / Shift+P / Ctrl+P), stencil caps in a flat, user-chosen colour, cuts saved with the model, in bookmarks and comment views, and as BCF clipping planes; tools skip cut geometry |
 | 2026-10-10 | Photo mode (`261010c_PhotoMode`) | M: clean-frame photo mode, hi-res stills (1–4×, PNG / JPEG), 360° equirectangular panoramas (4K / 8K, Photo Sphere metadata), exposure, field of view |
+| 2026-10-10 | Licence | BimGo relicensed MIT → **MIT-0** (no attribution required, same disclaimer); notices gained trademarks, acknowledgements and a licence-review / contact statement |
 
 ## 10. Dependencies
 
-BimGo.Revit ships no packages. Licence texts: `THIRD-PARTY-NOTICES.txt` (copied beside `BimGo.exe` with `LICENSE.txt`).
+BimGo itself is MIT-0 (`LICENSE`); the packages below are MIT, whose notices must still ship with the app. BimGo.Revit ships no packages. Licence texts: `THIRD-PARTY-NOTICES.txt` (copied beside `BimGo.exe` with `LICENSE.txt`).
 
 | Package | Version | Licence | Used in | Why |
 |---|---|---|---|---|

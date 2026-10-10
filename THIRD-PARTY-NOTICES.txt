@@ -1,9 +1,12 @@
 BimGo — third-party notices
 ===========================
 
-BimGo (Copyright (c) 2026 Aussie BIM Guru, MIT licence, see LICENSE) uses the
+BimGo (Copyright 2026 Aussie BIM Guru) is released under the MIT No Attribution
+licence (MIT-0, see LICENSE): anyone may use it for any purpose without credit,
+and it is provided as is, without warranty or liability. It uses the
 components below. Only BimGo.exe (the app) contains them; the BimGo for Revit
-add-in ships none. Each is used under the MIT licence reproduced at the end.
+add-in ships none. Each is used under the MIT licence reproduced at the end,
+which requires this notice to accompany copies of BimGo.exe.
 
 Component                                   Version     Copyright
 ------------------------------------------  ----------  ------------------------------------------------
@@ -51,6 +54,77 @@ textures are included in BimGo.
   grass              Grass001          https://ambientcg.com/a/Grass001
   asphalt            Asphalt031        https://ambientcg.com/a/Asphalt031
   fabric             Fabric030         https://ambientcg.com/a/Fabric030
+
+--------------------------------------------------------------------------------
+Trademarks
+
+Autodesk and Revit are registered trademarks of Autodesk, Inc. BCF (BIM
+Collaboration Format) and IFC are standards of buildingSMART International.
+Windows, Bahnschrift, Segoe UI and Consolas are trademarks of Microsoft
+Corporation. BimGo is an independent project and is not affiliated with,
+sponsored by or endorsed by Autodesk, buildingSMART International or Microsoft.
+"BimGo for Revit" describes compatibility only.
+
+--------------------------------------------------------------------------------
+Not shipped with BimGo
+
+- Autodesk Revit API (RevitAPI.dll, RevitAPIUI.dll): referenced at build time
+  from the user's own Revit installation and never copied into BimGo's output.
+  No Autodesk files, textures or content are included.
+- Fonts: the interface draws text with fonts already installed in Windows
+  (Bahnschrift, Segoe UI, Consolas, with fallbacks). No font files are shipped.
+- OpenGL: provided by Windows and the graphics driver; all shaders are
+  BimGo's own.
+
+--------------------------------------------------------------------------------
+Acknowledgements: published methods and open formats
+
+BimGo implements the methods and formats below from their published
+descriptions and formulas. No third-party source code is copied. They are
+acknowledged with thanks.
+
+Sun and daylight
+- Solar position: NOAA Global Monitoring Laboratory, "General Solar Position
+  Calculations" (declination and equation of time). US Government work.
+- Sky luminance: CIE standard overcast sky and CIE clear sky distributions
+  (Commission Internationale de l'Eclairage; ISO 15469 / CIE S 011).
+- Clear-sky illuminance: IES (Illuminating Engineering Society) clear-sky
+  diffuse horizontal and direct normal illuminance formulas.
+- Internally reflected component: BRE (Building Research Establishment)
+  split-flux formula.
+- Ray directions: Hammersley point set with cosine-weighted hemisphere mapping.
+- Sun hours, daylight factor and lux results are early design indicators, not
+  compliance simulations.
+
+Rendering and geometry
+- Ambient occlusion: spiral sampling after M. McGuire, M. Mara, D. Luebke,
+  "Scalable Ambient Obscurance" (HPG 2012); BimGo's own GLSL.
+- Ray / triangle intersection: T. Moller and B. Trumbore, "Fast, Minimum
+  Storage Ray-Triangle Intersection" (1997).
+- Reflections: C. Schlick's Fresnel approximation (1994).
+- Shadows: shadow mapping with percentage-closer filtering (W. Reeves,
+  D. Salesin, R. Cook, 1987).
+- Section caps: the stencil-buffer capping technique for clipping planes.
+
+File formats
+- BCF 2.1 (BCF-XML), buildingSMART International: comment import / export.
+- IFC GUID compressed 22-character encoding, buildingSMART International.
+- Google Photo Sphere XMP metadata (GPano) for 360-degree panoramas.
+- PNG and JPEG via the .NET / Windows imaging components.
+
+--------------------------------------------------------------------------------
+Licence review and contact
+
+BimGo is intended as freely available, open source software for the building
+and design industry, and we want it properly managed and vetted. Its
+dependencies and code are being cross-checked against FOSSA and reviewed
+progressively with AI assistance (Claude) to confirm that licensing
+requirements are met.
+
+If you believe any part of BimGo does not meet a licence's requirements, or
+that an attribution is missing, please tell us (Aussie BIM Guru, via the
+project's repository issues). We will add the attribution or remedy any
+non-permissible use promptly.
 
 --------------------------------------------------------------------------------
 MIT License

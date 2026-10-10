@@ -1,6 +1,6 @@
 # BimGo: Handoff for a new chat (two feature rounds → hotkeys → polish → installer)
 
-**Context:** BimGo is Gavin's personal project (publisher **Aussie BIM Guru**, MIT, C# / Visual Studio, .NET 8,
+**Context:** BimGo is Gavin's personal project (publisher **Aussie BIM Guru**, **MIT-0** (relicensed from MIT 2026-10-10), C# / Visual Studio, .NET 8,
 custom OpenGL renderer over Silk.NET). He works in **rounds**: discuss → stage questions with AskUserQuestion
 (recommended option first) → build → deliver a zip + `ai/<date>_<topic>/` notes + README + a project doc.
 
@@ -84,11 +84,11 @@ Möller–Trumbore, Hammersley points, Schlick Fresnel, PCF; open formats: BCF 2
 Photo Sphere XMP.
 
 Add:
-1. **Trademark notice** (README, About / help, installer, `.bundle` description): "Autodesk and Revit are registered
+1. **Trademark notice** (done in `THIRD-PARTY-NOTICES.txt`, 2026-10-10; still to add to README, About / help, installer, `.bundle` description): "Autodesk and Revit are registered
    trademarks of Autodesk, Inc. BCF is a buildingSMART International standard. BimGo is an independent project, not
    affiliated with or endorsed by Autodesk or buildingSMART." Name the add-in as "BimGo for Revit" (descriptive use),
    never Autodesk logos or "Autodesk BimGo".
-2. **Acknowledgements section** in `THIRD-PARTY-NOTICES.txt` (courtesy, not required): the methods and formats above
+2. **Acknowledgements section**: done in `THIRD-PARTY-NOTICES.txt` (2026-10-10), with a licence-review / contact statement (FOSSA cross-check); keep it current: the methods and formats above
    with references.
 3. **Recheck the publish folder** against the notices at installer time (transitive System.* / Microsoft.* packages,
    the self-contained .NET runtime: MIT, plus its own THIRD-PARTY-NOTICES which the runtime ships; include it).
@@ -96,6 +96,9 @@ Add:
 5. **Round A / B new parts stay in-box:** Media Foundation H.264 encoder and XInput are Windows components (Microsoft
    covers the codec licence for in-box use); no codec or library is bundled. If a bundled encoder (e.g. FFmpeg,
    x264 = GPL) is ever proposed, stop and ask Gavin.
+6. **Licence is MIT-0** (Gavin, 2026-10-10: no attribution required; disclaimer kept). Installer licence page shows the
+   MIT-0 `LICENSE`; `claude/BimGo_Installer_Handoff.md` still says MIT (§3 row 5): MIT-0 replaces it. Third-party
+   MIT notices must still ship beside `BimGo.exe`.
 
 ## 3. Current key map (from code + README §3)
 

@@ -1,4 +1,4 @@
-# BimGo: Handoff for a new chat (two feature rounds → hotkeys → polish → installer)
+# BimGo: Handoff for a new chat (feature rounds A–C → hotkeys → polish → installer)
 
 **Context:** BimGo is Gavin's personal project (publisher **Aussie BIM Guru**, **MIT-0** (relicensed from MIT 2026-10-10), C# / Visual Studio, .NET 8,
 custom OpenGL renderer over Silk.NET). He works in **rounds**: discuss → stage questions with AskUserQuestion
@@ -26,7 +26,7 @@ Minimap stays as is (no room names, no teleport from it).
 
 ## 2. Plan for the next chat (agreed with Gavin, 2026-10-10)
 
-Features were reviewed and approved here. Build them in **two rounds**, then the hotkey review, polish and installer.
+Features were reviewed and approved here. Build them in **Rounds A and B**, then the stretch goal **Round C (clash detection)**, then the hotkey review, polish and installer.
 Stage the detailed questions for each round with AskUserQuestion (recommendation first) before building.
 
 ### Round A: presentation
@@ -61,6 +61,37 @@ Stage the detailed questions for each round with AskUserQuestion (recommendation
    crouch, run, gun select and fire, menus. It uses the same action map (rebindable is a question).
 6. **Start screen:** when BimGo opens without a file, recent `.bimgo` files with thumbnails, OPEN…, and the last
    live session if one exists. Recent list kept in settings.
+
+### Round C (stretch goal): clash detection (agreed 2026-10-10)
+
+Runs **in the BimGo app** on the snapshot's triangles (files and live sessions alike), on a worker with progress and
+cancel; no Revit needed. Data per element is already there: triangles, bounds, category, `FamilyType`, level, link,
+`UniqueId`, `IfcGuid`, extra parameters.
+
+1. **Tests:** **hard** (intersection beyond a tolerance, e.g. ignore ≤ 5 mm) and **clearance** (closer than a
+   distance). Each test = set A × set B (or A × itself), tolerance / distance, name. Broad phase on element bounds
+   (sweep and prune or a grid), narrow phase triangle–triangle (intersection; distance for clearance). Skip an element
+   against itself and host ↔ hosted inserts (`HostId`); flag proxies (bounding-box stand-ins) as approximate.
+   Containment and duplicates were considered and left out.
+2. **Search sets, worked in progressively** (Gavin: wants all, in stages):
+   - **C1:** rules on category / family / type (equals / contains, include / exclude, AND / OR) + level + linked model.
+   - **Later:** extra-parameter rules (only the parameters chosen at export), and hand-picked selection sets (Scan
+     gun add / remove).
+3. **Storage:** tests, sets and results saved **in the `.bimgo`** (a new optional part, e.g. `clashes.json`; older
+   readers ignore it, no format bump) **and in the model's BimGo folder** (shared like comments). **EXPORT / IMPORT
+   REPORT** (BimGo JSON) to compare against any externally cached run. No Navisworks import; other tools' clashes can
+   still arrive as BCF topics.
+4. **Revisiting:** a clash is matched across runs by its **element pair (UniqueIds, plus link key) and test**. Status
+   **New / Active / Reviewed / Approved / Resolved**; a clash gone on re-run becomes Resolved (and comes back as Active
+   if it reappears). Assignee and notes kept; run history with counts per status (did we clean them up?).
+5. **Review:** a **clash panel** (list, filters by test / level / status) with **GO**: fly to the clash point,
+   auto section box around it, the two elements in red / green, the rest ghosted. **To comments / BCF:** turn chosen
+   clashes into comments (view + picture), so the existing EXPORT BCF carries them.
+6. **Grouping logic** (Gavin: handy, to review during development): e.g. group by element (one duct hitting many
+   beams), by level, or by proximity (clashes within a distance). Prototype and choose with Gavin.
+
+Questions to stage at the start of Round C: tolerance defaults, panel key (only C / Y free unless the rebinding work
+frees more), per-run size limits, how ghosting looks, whether GO's section box should stay after leaving the panel.
 
 ### Then
 1. **Hotkey review:** choose the default keyboard and gamepad map with Gavin (§3 is the current map), then update

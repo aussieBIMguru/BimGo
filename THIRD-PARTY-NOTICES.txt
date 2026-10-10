@@ -1,9 +1,12 @@
 BimGo — third-party notices
 ===========================
 
-BimGo (Copyright (c) 2026 Aussie BIM Guru, MIT licence, see LICENSE) uses the
+BimGo (Copyright 2026 Aussie BIM Guru) is released under the MIT No Attribution
+licence (MIT-0, see LICENSE): anyone may use it for any purpose without credit,
+and it is provided as is, without warranty or liability. It uses the
 components below. Only BimGo.exe (the app) contains them; the BimGo for Revit
-add-in ships none. Each is used under the MIT licence reproduced at the end.
+add-in ships none. Each is used under the MIT licence reproduced at the end,
+which requires this notice to accompany copies of BimGo.exe.
 
 Component                                   Version     Copyright
 ------------------------------------------  ----------  ------------------------------------------------

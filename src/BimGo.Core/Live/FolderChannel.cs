@@ -245,10 +245,24 @@ namespace BimGo.Live
             return chars.Length == 0 ? "msg" : new string(chars);
         }
 
+        /// <summary>
+        /// Deletes a handled message, retrying briefly: on Windows a just-created file can be held for a moment by
+        /// anti-virus or the search indexer. If it is still held, the next scan deletes it (the id check stops it being
+        /// handled twice).
+        /// </summary>
         private static void TryDelete(string file)
         {
-            try { File.Delete(file); }
-            catch { /* retried by the next scan; the id check stops it being handled twice */ }
+            for (int attempt = 0; attempt < 4; attempt++)
+            {
+                try
+                {
+                    File.Delete(file);
+                    return;
+                }
+                catch (IOException) { Thread.Sleep(15); }
+                catch (UnauthorizedAccessException) { Thread.Sleep(15); }
+                catch { return; }
+            }
         }
 
         /// <summary>

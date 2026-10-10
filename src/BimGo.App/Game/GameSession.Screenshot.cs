@@ -33,7 +33,8 @@ namespace BimGo.Game
         /// <summary>
         /// Reads the window's back buffer (the scene only: called before the map and UI are drawn) and saves it.
         /// </summary>
-        private unsafe void CaptureScreenshot(int width, int height)
+        /// <param name="suffix">Added to the file name (e.g. " sun hours"), or null.</param>
+        private unsafe void CaptureScreenshot(int width, int height, string suffix = null)
         {
             _screenshotRequested = false;
             if (width <= 0 || height <= 0) { return; }
@@ -57,7 +58,7 @@ namespace BimGo.Game
                 return;
             }
 
-            string name = SafeFileName(Path.GetFileNameWithoutExtension(DocumentName)) + " " + DateTime.Now.ToString("yyyy-MM-dd HHmmss", System.Globalization.CultureInfo.InvariantCulture) + ".png";
+            string name = SafeFileName(Path.GetFileNameWithoutExtension(DocumentName)) + (suffix ?? string.Empty) + " " + DateTime.Now.ToString("yyyy-MM-dd HHmmss", System.Globalization.CultureInfo.InvariantCulture) + ".png";
             string path = Path.Combine(ScreenshotFolder, name);
             Sound.Play(SoundId.UiClick);
             Flash(0x60FFFFFF, 0.12f);

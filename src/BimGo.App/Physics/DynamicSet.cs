@@ -193,8 +193,10 @@ namespace BimGo.Physics
         /// <param name="direction">Unit direction.</param>
         /// <param name="maxDistance">Maximum distance.</param>
         /// <param name="hit">The hit (Element = source element, DynamicId = instance).</param>
+        /// <param name="exclude">An instance to ignore (drop to floor: the element being dropped), or null.</param>
+        /// <param name="opaqueOnly">True to pass through glass (sun hours).</param>
         /// <returns>True on a hit.</returns>
-        public bool Raycast(Vector3 origin, Vector3 direction, float maxDistance, out RayHit hit)
+        public bool Raycast(Vector3 origin, Vector3 direction, float maxDistance, out RayHit hit, DynamicInstance exclude = null, bool opaqueOnly = false)
         {
             hit = default;
             if (Instances.Count == 0) { return false; }
@@ -206,7 +208,7 @@ namespace BimGo.Physics
             for (int i = 0; i < Instances.Count; i++)
             {
                 DynamicInstance instance = Instances[i];
-                if (!IsActive(instance)) { continue; }
+                if (!IsActive(instance) || ReferenceEquals(instance, exclude)) { continue; }
                 Aabb bounds = instance.WorldBounds;
                 if (!GeoMath.RayAabb(origin, invDir, bounds.Min, bounds.Max, best, out _)) { continue; }
 
@@ -215,7 +217,7 @@ namespace BimGo.Physics
                 Vector3 localDirection = Vector3.TransformNormal(direction, instance.InverseModel);
 
                 _solo[instance.Element] = true;
-                bool hitLocal = _bvh.Raycast(localOrigin, localDirection, best, _solo, out RayHit local);
+                bool hitLocal = _bvh.Raycast(localOrigin, localDirection, best, _solo, out RayHit local, opaqueOnly);
                 _solo[instance.Element] = false;
 
                 if (hitLocal && local.Distance < best)

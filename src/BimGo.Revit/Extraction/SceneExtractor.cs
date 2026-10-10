@@ -120,9 +120,13 @@ namespace BimGo.Extraction
         /// it). Cancelling throws <see cref="OperationCanceledException"/>; nothing in the model is changed.
         /// </param>
         /// <returns>The SceneData.</returns>
-        public static SceneData Extract(UIDocument uiDoc, LaunchSettings settings, OperationProgress progress = null)
+        /// <param name="liveSession">
+        /// True for Go and live refreshes: the family library is added when <see cref="LaunchSettings.FamilyLibrary"/>
+        /// is on. Export .bimgo passes false (files never carry the library from Revit).
+        /// </param>
+        public static SceneData Extract(UIDocument uiDoc, LaunchSettings settings, OperationProgress progress = null, bool liveSession = false)
         {
-            var extractor = new SceneExtractor(uiDoc.Document, settings, progress);
+            var extractor = new SceneExtractor(uiDoc.Document, settings, progress) { _includeLibrary = liveSession && settings.FamilyLibrary };
             return extractor.Run(uiDoc);
         }
 
@@ -190,7 +194,7 @@ namespace BimGo.Extraction
             bool[] loaded = new bool[catalog.Count];
             int totalElements = work.Sum(w => w.Elements.Count);
             int processed = 0;
-            _progress?.Begin("Extracting geometry", 0.12, 0.85);
+            _progress?.Begin("Extracting geometry", 0.12, _includeLibrary ? 0.78 : 0.85);
             foreach ((SourceModel source, CategoryDef def, List<Element> elements) in work)
             {
                 _src = source;
@@ -233,6 +237,19 @@ namespace BimGo.Extraction
             }
             if (!bounds.IsValid) { bounds = new Aabb(new Vector3(-10, -10, 0), new Vector3(10, 10, 3)); }
 
+            // The family library (live sessions, opt-in): hidden templates after every model element
+            LibraryData library = LibraryData.Empty;
+            if (_includeLibrary)
+            {
+                try { library = ExtractLibrary(loaded); }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    Utilities.Log_Utils.Write($"Family library skipped: {ex}");
+                    library = LibraryData.Empty;
+                }
+            }
+
             stopwatch.Stop();
             Utilities.Log_Utils.Write($"Extracted {_elements.Count} elements, {_indices.Count / 3} triangles, {rooms.Count} rooms, {_links.Count} links " +
                 $"in {stopwatch.Elapsed.TotalSeconds:F1}s (proxies {_proxyCount}, skipped {_skippedCount}). Phases: {_phases.Existing?.Name ?? "none"} → {phase?.Name ?? "none"}.");
@@ -260,6 +277,7 @@ namespace BimGo.Extraction
                 Parameters = _parameters?.Build() ?? ParameterTable.Empty,
                 Lighting = BuildLighting(),
                 Materials = BuildMaterials(),
+                Library = library,
                 CategoryLoaded = loaded,
                 CategoryElementCounts = counts,
                 Settings = _settings,
@@ -621,7 +639,7 @@ namespace BimGo.Extraction
         /// <returns>True if a record was added.</returns>
         private bool ExtractElement(Element element, CategoryDef def)
         {
-            GeometryElement geometry = element.get_Geometry(_src.GeometryOptions ?? _geometryOptions);
+            GeometryElement geometry = element.get_Geometry((_libraryPass ? null : _src.GeometryOptions) ?? _geometryOptions);
             if (geometry == null) { return false; }
 
             // Reset per-element state
@@ -686,6 +704,7 @@ namespace BimGo.Extraction
             {
                 ElementId = element.Id.Value,
                 UniqueId = element.UniqueId ?? string.Empty,
+                IfcGuid = IfcGuidOf(element),
                 HostId = HostIdOf(element),
                 Name = SafeName(element),
                 CategoryName = element.Category?.Name ?? def.Label,
@@ -1035,6 +1054,26 @@ namespace BimGo.Extraction
         #endregion
 
         #region Metadata
+
+        /// <summary>
+        /// The element's IFC GUID as Revit's IFC exporter writes it (BCF round): the stored "IfcGUID" parameter when
+        /// it holds a valid one (models exported with "store the IFC GUID"), else the export id compressed. Empty when
+        /// neither is available. Reads only; nothing in the model changes.
+        /// </summary>
+        private static string IfcGuidOf(Element element)
+        {
+            try
+            {
+                string stored = element.get_Parameter(BuiltInParameter.IFC_GUID)?.AsString();
+                if (IfcGuid.IsValid(stored)) { return stored; }
+                Guid exportId = ExportUtils.GetExportId(element.Document, element.Id);
+                return exportId == Guid.Empty ? string.Empty : IfcGuid.Encode(exportId);
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
 
         private static string SafeName(Element element)
         {

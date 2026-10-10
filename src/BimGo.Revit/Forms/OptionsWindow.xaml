@@ -147,6 +147,7 @@
                                 <RowDefinition Height="34"/>
                                 <RowDefinition Height="38"/>
                                 <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
 
                             <TextBlock Grid.Row="0" Style="{StaticResource FieldLabel}" Text="Triangle limit per element"/>
@@ -172,6 +173,17 @@
                                 <CheckBox x:Name="CheckSkipHelpers" Content="Leave out light sources (IES cones) and any subcategory whose name contains:" Click="CheckSkipHelpers_Click"/>
                                 <TextBox x:Name="TextHelperKeywords" Height="28" Margin="22,6,0,0" Padding="6,0" VerticalContentAlignment="Center" BorderBrush="#B7BDC4"
                                          ToolTip="Comma-separated, case-insensitive parts of subcategory names (e.g. clearance, zone, cone)"/>
+                            </StackPanel>
+
+                            <TextBlock Grid.Row="4" Style="{StaticResource FieldLabel}" VerticalAlignment="Top" Margin="0,14,0,0" Text="Family library"/>
+                            <StackPanel Grid.Row="4" Grid.Column="1" Margin="0,14,0,0">
+                                <CheckBox x:Name="CheckFamilyLibrary" Content="Include the family library (Go only): place loaded families in the walkthrough"
+                                          ToolTip="The loadable family types in the ticked furniture, fixture and services categories, with Revit's previews. Level-based and work-plane-based types also bring their geometry, read from temporary instances that are rolled back (nothing changes in the model). Export .bimgo never includes it."/>
+                                <StackPanel Orientation="Horizontal" Margin="22,6,0,0">
+                                    <TextBlock VerticalAlignment="Center" FontSize="12" Foreground="{StaticResource Muted}" Text="At most"/>
+                                    <TextBox x:Name="TextFamilyLibraryMax" Style="{StaticResource MonoBox}" Margin="8,0,8,0"/>
+                                    <TextBlock VerticalAlignment="Center" FontSize="12" Foreground="{StaticResource Muted}" Text="family types (types already used in the model first; Go takes longer with more)"/>
+                                </StackPanel>
                             </StackPanel>
                         </Grid>
                     </StackPanel>

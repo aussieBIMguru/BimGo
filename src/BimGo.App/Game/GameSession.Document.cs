@@ -92,6 +92,7 @@ namespace BimGo.Game
                 {
                     EditOp.Transform => JournalOps.TRANSFORM,
                     EditOp.Copy => JournalOps.CLONE,
+                    EditOp.Place => JournalOps.PLACE,
                     _ => JournalOps.HIDE
                 },
                 Mode = request.Op switch
@@ -104,6 +105,8 @@ namespace BimGo.Game
                 UniqueId = uniqueId,
                 TargetCloneKey = cloneKey,
                 NewCloneKey = request.NewCloneKey,
+                TypeUniqueId = request.Op == EditOp.Place ? request.TypeUniqueId : null,
+                TypeId = request.Op == EditOp.Place ? request.TypeId : 0,
                 Pivot = request.Pivot,
                 Offset = request.Translation,
                 Angle = request.Angle,
@@ -111,7 +114,7 @@ namespace BimGo.Game
                 Utc = DateTime.UtcNow,
                 User = Environment.UserName,
                 AppliedToRevit = Source.IsRevit,
-                RevitElementId = request.Op == EditOp.Copy && Source.IsRevit ? result.NewElementId : 0
+                RevitElementId = (request.Op == EditOp.Copy || request.Op == EditOp.Place) && Source.IsRevit ? result.NewElementId : 0
             };
             _journal.Add(entry);
             UpdateTitle();
@@ -215,6 +218,9 @@ namespace BimGo.Game
         /// </summary>
         private bool ApplyEntry(JournalEntry entry)
         {
+            // A family library placement has no target: it clones the type's template
+            if (entry.Op == JournalOps.PLACE) { return ApplyPlaceEntry(entry); }
+
             if (!ResolveTarget(entry.TargetCloneKey, entry.UniqueId, entry.ElementId, out int element, out DynamicInstance clone)) { return false; }
 
             switch (entry.Op)
@@ -286,7 +292,7 @@ namespace BimGo.Game
             }
             for (int e = 0; e < _hidden.Length; e++)
             {
-                if (_hidden[e]) { SetStaticHidden(e, false); }
+                if (_hidden[e]) { SetStaticHidden(e, false); } // library templates stay hidden (SetStaticHidden ignores them)
             }
             _nextCloneKey = 0;
         }
@@ -500,6 +506,7 @@ namespace BimGo.Game
             UpdateSun(dt);
             UpdateScreenshot();
             UpdateVisibilitySidecar(dt);
+            UpdateSunStudy();
 
             while (_window.TryTakeDroppedFile(out string dropped))
             {

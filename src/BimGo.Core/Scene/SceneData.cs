@@ -104,6 +104,12 @@ namespace BimGo.Scene
         public string UniqueId { get; init; } = string.Empty;
 
         /// <summary>
+        /// The element's IFC GUID (22 characters, as Revit's IFC exporter writes it; BCF round), or empty for files
+        /// written before it was captured. Used to name elements in BCF viewpoints.
+        /// </summary>
+        public string IfcGuid { get; init; } = string.Empty;
+
+        /// <summary>
         /// The ElementId value of the host (e.g. the wall a door sits in), or 0. Lets standalone demolition remove
         /// hosted inserts with their host, as Revit does.
         /// </summary>
@@ -170,6 +176,13 @@ namespace BimGo.Scene
 
         /// <summary>True for an element from a linked model (read-only in the walkthrough).</summary>
         public bool IsLinked => Link > 0;
+
+        /// <summary>
+        /// True for a family library template (next round): hidden geometry of a family type that isn't (necessarily)
+        /// in the model, kept at the tail of the snapshot for the Place gun to clone. Never drawn, picked or collided
+        /// as itself; has no ElementId or UniqueId (see <see cref="LibraryData"/>).
+        /// </summary>
+        public bool IsLibraryTemplate { get; init; }
     }
 
     /// <summary>
@@ -221,6 +234,45 @@ namespace BimGo.Scene
 
         /// <summary>0 for a host room, n for a room from <c>SceneData.Links[n - 1]</c> (host rooms win in the readout).</summary>
         public int Link { get; init; }
+
+        /// <summary>
+        /// True when a plan point is inside the room (even-odd over all its loops, so islands are holes).
+        /// </summary>
+        public bool Contains(Vector2 p)
+        {
+            if (Loops == null || p.X < Min.X || p.Y < Min.Y || p.X > Max.X || p.Y > Max.Y) { return false; }
+            bool inside = false;
+            foreach (Vector2[] loop in Loops)
+            {
+                if (loop == null) { continue; }
+                for (int i = 0, j = loop.Length - 1; i < loop.Length; j = i++)
+                {
+                    Vector2 a = loop[i], b = loop[j];
+                    if ((a.Y > p.Y) != (b.Y > p.Y) && p.X < (b.X - a.X) * (p.Y - a.Y) / (b.Y - a.Y) + a.X) { inside = !inside; }
+                }
+            }
+            return inside;
+        }
+
+        /// <summary>
+        /// The shortest plan distance from a point to the room's boundary (any loop).
+        /// </summary>
+        public float DistanceToBoundary(Vector2 p)
+        {
+            float best = float.MaxValue;
+            if (Loops == null) { return best; }
+            foreach (Vector2[] loop in Loops)
+            {
+                if (loop == null) { continue; }
+                for (int i = 0, j = loop.Length - 1; i < loop.Length; j = i++)
+                {
+                    Vector2 a = loop[j], ab = loop[i] - a;
+                    float t = ab.LengthSquared() > 1e-12f ? Math.Clamp(Vector2.Dot(p - a, ab) / ab.LengthSquared(), 0f, 1f) : 0f;
+                    best = MathF.Min(best, Vector2.Distance(p, a + ab * t));
+                }
+            }
+            return best;
+        }
     }
 
     /// <summary>
@@ -326,6 +378,15 @@ namespace BimGo.Scene
 
         /// <summary>Materials, textures and surface coordinates for Realistic mode (optional; never null).</summary>
         public MaterialData Materials { get; init; } = MaterialData.Empty;
+
+        /// <summary>The family library: offered types, previews and template geometry (optional; never null).</summary>
+        public LibraryData Library { get; init; } = LibraryData.Empty;
+
+        /// <summary>
+        /// Vertices that belong to the model itself: everything before the library templates (all of them when there
+        /// is no library).
+        /// </summary>
+        public int ModelVertexCount => Library.IsEmpty ? Vertices.Length : Math.Clamp(Library.VertexStart, 0, Vertices.Length);
 
         /// <summary>Optional extra parameter values per element (names picked in the Options dialog). Never null.</summary>
         public ParameterTable Parameters { get; init; } = ParameterTable.Empty;

@@ -59,7 +59,7 @@ namespace BimGo.Bridge
                 var createdBy = new Dictionary<int, int>();
                 foreach (JournalEntry entry in entries)
                 {
-                    if (entry.Op == JournalOps.CLONE && entry.NewCloneKey != 0) { createdBy[entry.NewCloneKey] = entry.Seq; }
+                    if (JournalOps.Creates(entry.Op) && entry.NewCloneKey != 0) { createdBy[entry.NewCloneKey] = entry.Seq; }
                 }
 
                 double tolerance = Math.Clamp(request.ToleranceMm, 0.1, 1000.0);
@@ -124,6 +124,9 @@ namespace BimGo.Bridge
         {
             var result = new JournalEntryResult { Seq = entry.Seq };
             if (entry.AppliedToRevit) { return Status(result, JournalStatus.ALREADY_APPLIED, "Already in Revit"); }
+
+            // A placement from the family library has no target: it creates the type's new instance
+            if (entry.Op == JournalOps.PLACE) { return ApplyPlace(doc, entry, phases, clones, result); }
 
             bool isHide = entry.Op == JournalOps.HIDE;
             bool isDelete = isHide && entry.Mode == JournalOps.MODE_DELETE;
@@ -202,6 +205,31 @@ namespace BimGo.Bridge
                 note ??= phases.New == null ? "Copied" : $"Copied (new in {phases.New.Name})";
             }
             return Status(result, JournalStatus.APPLIED, note ?? "Moved");
+        }
+
+        /// <summary>
+        /// A family library placement: places the type's new instance where the file put it and registers it under
+        /// the entry's clone key (later moves of it target that key). No staleness check: nothing existed before.
+        /// </summary>
+        private JournalEntryResult ApplyPlace(Document doc, JournalEntry entry, PhasePair phases, Dictionary<int, ElementId> clones, JournalEntryResult result)
+        {
+            var request = new EditRequest
+            {
+                Ticket = entry.Seq,
+                Op = EditOp.Place,
+                NewCloneKey = entry.NewCloneKey,
+                TypeUniqueId = entry.TypeUniqueId,
+                TypeId = entry.TypeId,
+                Pivot = entry.Pivot,
+                Angle = entry.Angle,
+                Label = string.IsNullOrWhiteSpace(entry.Label) ? "Place" : entry.Label
+            };
+            EditResult placed = Place(doc, request, phases, out ElementId newId);
+            if (!placed.Success) { return Status(result, JournalStatus.FAILED, placed.Message); }
+
+            if (entry.NewCloneKey != 0) { clones[entry.NewCloneKey] = newId; }
+            result.NewElementId = newId.Value;
+            return Status(result, JournalStatus.APPLIED, phases.New == null ? "Placed" : $"Placed (new in {phases.New.Name})");
         }
 
         /// <summary>

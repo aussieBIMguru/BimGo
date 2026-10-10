@@ -58,6 +58,7 @@ namespace BimGo.Format
                 if (document == null) { return null; }
                 document.Comments ??= new List<CommentRecord>();
                 document.Comments.RemoveAll(c => c == null || string.IsNullOrWhiteSpace(c.Text));
+                CommentSnapshots.LoadBeside(path, document);
                 return document;
             }
             catch (Exception ex)
@@ -81,6 +82,7 @@ namespace BimGo.Format
                 string temp = path + ".tmp";
                 File.WriteAllText(temp, JsonSerializer.Serialize(document, OPTIONS));
                 File.Move(temp, path, overwrite: true);
+                CommentSnapshots.WriteBeside(path, document);
                 ModelFolders.MirrorAfterWrite(path);
                 return true;
             }
@@ -89,6 +91,110 @@ namespace BimGo.Format
                 error = $"Comments could not be saved: {ex.Message}";
                 Utilities.Log_Utils.Write(error);
                 return false;
+            }
+        }
+    }
+
+    /// <summary>
+    /// The larger comment pictures used for BCF snapshots (BCF round). Each is a JPEG named
+    /// <c>comments/&lt;comment id&gt;.jpg</c>: an entry inside a .bimgo, or a file in the <c>comments</c> folder beside
+    /// <c>comments.json</c> in a model folder (only there: nothing is written beside a Revit model). Never throws.
+    /// </summary>
+    public static class CommentSnapshots
+    {
+        /// <summary>The folder (and entry prefix) holding the pictures.</summary>
+        public const string FOLDER = "comments/";
+
+        /// <summary>Largest picture read back (bytes).</summary>
+        private const long MAX_BYTES = 16L * 1024 * 1024;
+
+        /// <summary>
+        /// The picture name for a comment id: "comments/&lt;id&gt;.jpg" (characters other than letters, digits and
+        /// '-' replaced).
+        /// </summary>
+        public static string NameFor(string commentId)
+        {
+            var builder = new System.Text.StringBuilder(FOLDER.Length + 40);
+            builder.Append(FOLDER);
+            foreach (char c in commentId ?? string.Empty)
+            {
+                builder.Append(char.IsAsciiLetterOrDigit(c) || c == '-' ? c : '_');
+            }
+            if (builder.Length == FOLDER.Length) { builder.Append(Guid.NewGuid().ToString("N")); }
+            return builder.Append(".jpg").ToString();
+        }
+
+        /// <summary>True for "comments/&lt;safe name&gt;.jpg" (no sub-folders, no "..").</summary>
+        public static bool IsValidName(string name)
+        {
+            if (string.IsNullOrEmpty(name) || !name.StartsWith(FOLDER, StringComparison.Ordinal) || !name.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase)) { return false; }
+            string file = name[FOLDER.Length..^4];
+            if (file.Length == 0 || file.Length > 80) { return false; }
+            foreach (char c in file)
+            {
+                if (!(char.IsAsciiLetterOrDigit(c) || c == '-' || c == '_')) { return false; }
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Reads the pictures of a sidecar's comments from the folder beside it (missing files leave the comment
+        /// without one).
+        /// </summary>
+        public static void LoadBeside(string sidecarPath, CommentDocument document)
+        {
+            try
+            {
+                string folder = Path.GetDirectoryName(sidecarPath);
+                if (string.IsNullOrEmpty(folder) || document?.Comments == null) { return; }
+                foreach (CommentRecord record in document.Comments)
+                {
+                    if (record == null || !IsValidName(record.Snapshot)) { continue; }
+                    var file = new FileInfo(Path.Combine(folder, record.Snapshot.Replace('/', Path.DirectorySeparatorChar)));
+                    if (!file.Exists || file.Length > MAX_BYTES) { continue; }
+                    record.SnapshotData = File.ReadAllBytes(file.FullName);
+                    record.SnapshotDirty = false;
+                }
+            }
+            catch (Exception ex)
+            {
+                Utilities.Log_Utils.Write($"Comment pictures not read: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Writes changed pictures beside a model folder's comments.json and removes pictures no comment uses any
+        /// more. Does nothing for an old-style sidecar beside a model (pictures then stay in memory).
+        /// </summary>
+        public static void WriteBeside(string sidecarPath, CommentDocument document)
+        {
+            try
+            {
+                if (ModelFolders.FolderOf(sidecarPath) == null || document?.Comments == null) { return; }
+                string folder = Path.Combine(Path.GetDirectoryName(sidecarPath), FOLDER.TrimEnd('/'));
+                var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (CommentRecord record in document.Comments)
+                {
+                    if (record == null || !IsValidName(record.Snapshot)) { continue; }
+                    string file = Path.Combine(folder, record.Snapshot[FOLDER.Length..]);
+                    used.Add(Path.GetFileName(file));
+                    if (record.SnapshotData == null || (!record.SnapshotDirty && File.Exists(file))) { continue; }
+                    Directory.CreateDirectory(folder);
+                    string temp = file + ".tmp";
+                    File.WriteAllBytes(temp, record.SnapshotData);
+                    File.Move(temp, file, overwrite: true);
+                    record.SnapshotDirty = false;
+                }
+
+                if (!Directory.Exists(folder)) { return; }
+                foreach (string file in Directory.EnumerateFiles(folder, "*.jpg"))
+                {
+                    if (!used.Contains(Path.GetFileName(file))) { File.Delete(file); }
+                }
+            }
+            catch (Exception ex)
+            {
+                Utilities.Log_Utils.Write($"Comment pictures not saved: {ex.Message}");
             }
         }
     }

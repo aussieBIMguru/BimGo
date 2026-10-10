@@ -76,15 +76,20 @@ namespace BimGo.Tests
         /// A two-element scene: a host wall (opaque) and a door inside a linked model (opaque + transparent),
         /// one level, one room, one link, a parameter table and a geo-located site.
         /// </summary>
-        public static SceneData BuildScene(LightingData lighting = null, MaterialData materials = null)
+        /// <param name="library">
+        /// Optional family library: a third, template element (one triangle, vertices 9..11, flagged
+        /// <see cref="ElementRecord.IsLibraryTemplate"/>) is added for it (its entries should point at element 2).
+        /// </param>
+        public static SceneData BuildScene(LightingData lighting = null, MaterialData materials = null, LibraryData library = null)
         {
-            // Three triangles: wall (0..2), door opaque (3..5), door glass (6..8)
-            var vertices = new SceneVertex[9];
+            // Three triangles: wall (0..2), door opaque (3..5), door glass (6..8); with a library a template (9..11)
+            bool template = library != null;
+            var vertices = new SceneVertex[template ? 12 : 9];
             for (int i = 0; i < vertices.Length; i++)
             {
                 vertices[i] = new SceneVertex(new Vector3(i, i * 0.5f, i * 0.25f), Vector3.UnitZ, 0xFF000000u | (uint)(i * 1000));
             }
-            uint[] indices = { 0, 1, 2, 3, 4, 5, 6, 7, 8 };
+            uint[] indices = template ? new uint[] { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 } : new uint[] { 0, 1, 2, 3, 4, 5, 6, 7, 8 };
 
             int categories = CategoryCatalog.All.Count;
             bool[] loaded = new bool[categories];
@@ -121,7 +126,17 @@ namespace BimGo.Tests
                         Bounds = new Aabb(new Vector3(3, 1.5f, 0.75f), new Vector3(8, 4, 2)),
                         Movable = false, MoveBlockReason = "Linked element", Phase = PhaseRole.New, Link = 1
                     }
-                },
+                }.Concat(template ? new[]
+                {
+                    new ElementRecord
+                    {
+                        ElementId = 0, UniqueId = string.Empty, Name = "Chair", CategoryName = "Furniture", FamilyType = "Chair : Chair",
+                        LevelName = "—", CategoryIndex = CategoryCatalog.Find("furniture").Index, OpaqueStart = 9, OpaqueCount = 3,
+                        Bounds = new Aabb(new Vector3(9, 4.5f, -1997.75f), new Vector3(11, 5.5f, -1997.25f)), Movable = true,
+                        Pivot = new Vector3(10, 5, -1997.75f), Phase = PhaseRole.New, IsLibraryTemplate = true
+                    }
+                } : Array.Empty<ElementRecord>()).ToArray(),
+                Library = library ?? LibraryData.Empty,
                 Levels = new[] { new LevelInfo("Level 1", 0f), new LevelInfo("Level 2", 3.5f) },
                 Rooms = new[]
                 {
@@ -169,7 +184,7 @@ namespace BimGo.Tests
         /// A document holding <see cref="BuildScene"/> plus every optional part: comments, a three-entry journal,
         /// bookmarks with a home viewpoint and thumbnail, sun settings and visibility.
         /// </summary>
-        public static BimGoDocument BuildDocument(LightingData lighting = null, MaterialData materials = null)
+        public static BimGoDocument BuildDocument(LightingData lighting = null, MaterialData materials = null, LibraryData library = null)
         {
             var journal = new EditJournal();
             journal.Add(new JournalEntry
@@ -190,7 +205,7 @@ namespace BimGo.Tests
 
             return new BimGoDocument
             {
-                Scene = BuildScene(lighting, materials),
+                Scene = BuildScene(lighting, materials, library),
                 Comments = new CommentDocument
                 {
                     Model = "Test Model",

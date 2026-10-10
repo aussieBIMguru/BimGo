@@ -140,11 +140,14 @@ namespace BimGo.Game.Guns
         {
             foreach (CommentRecord record in Session.Comments.Comments)
             {
+                // Coloured by status (open: the comment colour, in progress: amber, closed: green and fainter)
                 bool hovered = ReferenceEquals(record, _hovered);
-                uint colour = hovered ? UiTheme.COMMENT_LABEL : UiTheme.COMMENT;
-                overlay.Line(record.Local, record.Local - new Vector3(0f, 0f, 0.3f), 2.5f, Rgba.WithAlpha(colour, 0.9f));
-                overlay.Dot(record.Local, hovered ? 11f : 9f, UiTheme.TEXT);
-                overlay.Dot(record.Local, hovered ? 9f : 7f, colour);
+                bool closed = record.Status == CommentStatus.CLOSED;
+                uint colour = hovered ? UiTheme.COMMENT_LABEL : UiTheme.StatusColour(record.Status);
+                float alpha = closed && !hovered ? 0.55f : 0.9f;
+                overlay.Line(record.Local, record.Local - new Vector3(0f, 0f, 0.3f), 2.5f, Rgba.WithAlpha(colour, alpha));
+                overlay.Dot(record.Local, hovered ? 11f : closed ? 7f : 9f, Rgba.WithAlpha(UiTheme.TEXT, closed ? 0.6f : 1f));
+                overlay.Dot(record.Local, hovered ? 9f : closed ? 5f : 7f, colour);
             }
 
             if (Session.IsEditingComment)
@@ -162,13 +165,20 @@ namespace BimGo.Game.Guns
             FontAtlas f = ui.Atlas;
             float width = S(250);
             float textHeight = ui.TextWrapped(f.Body, 0, 0, width - S(24), _hovered.Text, 0, maxLines: 8, draw: false);
-            float height = S(32) + textHeight;
+            float height = S(52) + textHeight;
             float x = MathF.Min(screen.X + S(20), Session.ScreenWidth - width - S(10));
             float y = MathF.Max(S(10), screen.Y - S(36));
 
             ui.Panel(x, y, width, height, UiTheme.PANEL_STRONG, UiTheme.COMMENT);
             ui.Text(f.Small, x + S(12), y + S(9), _hovered.Header, UiTheme.COMMENT_LABEL, S(0.8f));
             ui.TextWrapped(f.Body, x + S(12), y + S(27), width - S(24), _hovered.Text, UiTheme.TEXT, maxLines: 8);
+
+            // Status · priority · assignee · replies
+            TextBuffer issue = Session.Text.Clear().Append(CommentStatus.Label(_hovered.Status));
+            if (_hovered.Priority != CommentPriority.NORMAL) { issue.Append(" · ").Append(CommentPriority.Label(_hovered.Priority)); }
+            if (_hovered.AssignedTo != null) { issue.Append(" · → ").Append(_hovered.AssignedTo); }
+            if (_hovered.ReplyCount > 0) { issue.Append(" · ").Append(_hovered.ReplyCount).Append(_hovered.ReplyCount == 1 ? " reply" : " replies"); }
+            ui.TextWrapped(f.Small, x + S(12), y + S(32) + textHeight, width - S(24), issue.Span, UiTheme.StatusColour(_hovered.Status), maxLines: 1);
         }
 
         public override void DrawPanel(UiBatch ui, float x, float y, float width)

@@ -137,9 +137,9 @@ namespace BimGo.Game
         /// Adds a bookmark at a scene-local feet position and saves.
         /// </summary>
         /// <param name="sun">The sun's date / time when shadows are on (restored by GO), else null.</param>
-        public BookmarkRecord Add(string name, Vector3 localFeet, float yaw, float pitch, bool flying, string level, SunTime sun = null)
+        public BookmarkRecord Add(string name, Vector3 localFeet, float yaw, float pitch, bool flying, string level, SunTime sun = null, Scene.SectionCut section = null)
         {
-            BookmarkRecord record = CreatePending(name, localFeet, yaw, pitch, flying, level, sun);
+            BookmarkRecord record = CreatePending(name, localFeet, yaw, pitch, flying, level, sun, section);
             Bookmarks.Add(record);
             Save();
             return record;
@@ -149,7 +149,7 @@ namespace BimGo.Game
         /// Makes a bookmark that is not in the list yet (B: it joins the list only when its name is confirmed with
         /// Enter; Esc throws it away). Nothing is saved.
         /// </summary>
-        public BookmarkRecord CreatePending(string name, Vector3 localFeet, float yaw, float pitch, bool flying, string level, SunTime sun = null)
+        public BookmarkRecord CreatePending(string name, Vector3 localFeet, float yaw, float pitch, bool flying, string level, SunTime sun = null, Scene.SectionCut section = null)
         {
             var record = new BookmarkRecord
             {
@@ -158,7 +158,8 @@ namespace BimGo.Game
                 Pitch = pitch,
                 Flying = flying,
                 Level = level ?? string.Empty,
-                Sun = sun?.Copy()
+                Sun = sun?.Copy(),
+                Section = section?.Clone()
             };
             SetPosition(record, localFeet);
             Prepare(record);
@@ -194,11 +195,12 @@ namespace BimGo.Game
         /// Moves a bookmark to a new viewpoint (keeps its name and place in the list) and saves.
         /// </summary>
         /// <param name="sun">The sun's date / time when shadows are on, else null (clears it).</param>
-        public bool Update(BookmarkRecord record, Vector3 localFeet, float yaw, float pitch, bool flying, string level, SunTime sun = null)
+        public bool Update(BookmarkRecord record, Vector3 localFeet, float yaw, float pitch, bool flying, string level, SunTime sun = null, Scene.SectionCut section = null)
         {
             if (record == null || !Bookmarks.Contains(record)) { return false; }
             SetPosition(record, localFeet);
             record.Sun = sun?.Copy();
+            record.Section = section?.Clone();
             record.Yaw = yaw;
             record.Pitch = pitch;
             record.Flying = flying;

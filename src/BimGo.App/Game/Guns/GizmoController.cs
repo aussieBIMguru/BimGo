@@ -42,10 +42,22 @@ namespace BimGo.Game.Guns
         private const float ROTATE_SPEED = MathF.PI / 2f; // rad/s (90°/s)
         private const float FINE = 0.25f;
 
+        /// <summary>Drop to surface: furthest drop (m) below the element's base.</summary>
+        public const float MAX_DROP = 10f;
+
+        /// <summary>
+        /// Drop to surface: the ray starts this far (m) above the box's base (at most half the box's height), so an
+        /// element sunk into a floor or desk by up to this much is lifted onto it instead of dropping through.
+        /// </summary>
+        private const float LIFT_REACH = 0.3f;
+
         private readonly GameSession _session;
         private Vector3 _startOffset, _rawOffset;
         private float _startAngle, _rawAngle;
         private float _clock;
+
+        // After a drop the height is exact, not a whole snap increment: snapping leaves Z alone until E / Q steps it
+        private bool _zFree;
 
         #endregion
 
@@ -94,6 +106,7 @@ namespace BimGo.Game.Guns
             Mode = GizmoMode.Move;
             _startOffset = _rawOffset = target.Offset;
             _startAngle = _rawAngle = target.Angle;
+            _zFree = false;
         }
 
         /// <summary>
@@ -170,8 +183,8 @@ namespace BimGo.Game.Guns
                     if (input.IsPressedOrRepeated('D') || input.IsPressedOrRepeated(Vk.VK_RIGHT)) { stepMove += flatRight; }
                     if (input.IsPressedOrRepeated('A') || input.IsPressedOrRepeated(Vk.VK_LEFT)) { stepMove -= flatRight; }
                     _rawOffset += NearestAxis(stepMove) * step;
-                    if (input.IsPressedOrRepeated('E')) { _rawOffset.Z += step; }
-                    if (input.IsPressedOrRepeated('Q')) { _rawOffset.Z -= step; }
+                    if (input.IsPressedOrRepeated('E')) { _rawOffset.Z += step; _zFree = false; }
+                    if (input.IsPressedOrRepeated('Q')) { _rawOffset.Z -= step; _zFree = false; }
                 }
                 else
                 {
@@ -181,7 +194,7 @@ namespace BimGo.Game.Guns
 
                 // Clamp the change since lock-on to whole increments (also tidies a smooth move made before snapping)
                 Vector3 delta = _rawOffset - _startOffset;
-                _rawOffset = _startOffset + new Vector3(Snap(delta.X, step), Snap(delta.Y, step), Snap(delta.Z, step));
+                _rawOffset = _startOffset + new Vector3(Snap(delta.X, step), Snap(delta.Y, step), _zFree ? delta.Z : Snap(delta.Z, step));
                 _rawAngle = _startAngle + Snap(_rawAngle - _startAngle, angleStep);
                 offset = _rawOffset;
                 angle = _rawAngle;
@@ -198,6 +211,44 @@ namespace BimGo.Game.Guns
             {
                 _session.Dynamics.SetTransform(Target, offset, angle);
             }
+        }
+
+        /// <summary>
+        /// Drops or lifts the target so the bottom of its box rests on the first surface straight below the box's
+        /// bottom centre: one ray down from <see cref="LIFT_REACH"/> above the base (at most half the box's height),
+        /// against the visible static scene and the other moved / cloned elements, never the target itself. The first
+        /// hit wins, so a lamp over a desk lands on the desk, not the floor under it. Stays locked on (uncommitted):
+        /// RMB commits it as an ordinary move.
+        /// </summary>
+        /// <param name="message">Out: what happened, for a toast.</param>
+        /// <returns>True when the target moved.</returns>
+        public bool DropToSurface(out string message)
+        {
+            message = null;
+            if (Target == null) { return false; }
+
+            Aabb bounds = Target.WorldBounds;
+            float reach = MathF.Min(LIFT_REACH, MathF.Max(0f, bounds.Size.Z) * 0.5f);
+            Vector3 centre = bounds.Center;
+            var origin = new Vector3(centre.X, centre.Y, bounds.Min.Z + reach);
+            if (!_session.PickExcluding(origin, -Vector3.UnitZ, reach + MAX_DROP, Target, out RayHit hit))
+            {
+                message = "Nothing below to drop onto";
+                return false;
+            }
+
+            float change = hit.Point.Z - bounds.Min.Z;
+            if (MathF.Abs(change) < 5e-4f)
+            {
+                message = "Already resting on the surface below";
+                return false;
+            }
+
+            _rawOffset = Target.Offset + new Vector3(0f, 0f, change);
+            _zFree = true;
+            _session.Dynamics.SetTransform(Target, _rawOffset, Target.Angle);
+            message = change < 0f ? $"Dropped {-change:0.000} m onto the surface below" : $"Lifted {change:0.000} m onto the surface";
+            return true;
         }
 
         /// <summary>

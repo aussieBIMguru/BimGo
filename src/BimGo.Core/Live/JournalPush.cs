@@ -114,7 +114,7 @@ namespace BimGo.Live
                 {
                     payload.Entries.Add(entry);
                 }
-                else if (entry.Op == JournalOps.CLONE && entry.RevitElementId > 0 && entry.NewCloneKey != 0)
+                else if (JournalOps.Creates(entry.Op) && entry.RevitElementId > 0 && entry.NewCloneKey != 0)
                 {
                     payload.KnownClones.Add(new CloneRef { CloneKey = entry.NewCloneKey, ElementId = entry.RevitElementId });
                 }

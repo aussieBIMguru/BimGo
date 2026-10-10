@@ -207,6 +207,8 @@ namespace BimGo.Forms
             CheckViewOnly.IsChecked = _settings.ActiveViewOnly && _view.Available;
             CheckViewOnly.IsEnabled = _view.Available;
             CheckSkipHelpers.IsChecked = _settings.SkipHelperGeometry;
+            CheckFamilyLibrary.IsChecked = _settings.FamilyLibrary;
+            TextFamilyLibraryMax.Text = _settings.FamilyLibraryMax.ToString(CultureInfo.InvariantCulture);
             TextHelperKeywords.Text = string.Join(", ", _settings.HelperSubcategoryKeywords ?? LaunchSettings.DefaultHelperKeywords());
             LoadPhases();
             CheckSidecarsBesideModel.IsChecked = _settings.SidecarsBesideModel;
@@ -445,6 +447,11 @@ namespace BimGo.Forms
             if (enabled.Count > 0) { _settings.EnabledCategories = enabled; }
             _settings.ActiveViewOnly = viewOnly;
             _settings.SkipHelperGeometry = CheckSkipHelpers.IsChecked == true;
+            _settings.FamilyLibrary = CheckFamilyLibrary.IsChecked == true;
+            if (int.TryParse(TextFamilyLibraryMax.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int libraryMax))
+            {
+                _settings.FamilyLibraryMax = Math.Clamp(libraryMax, 10, LaunchSettings.MAX_FAMILY_LIBRARY);
+            }
             _settings.HelperSubcategoryKeywords = (TextHelperKeywords.Text ?? string.Empty)
                 .Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
                 .Select(k => k.Trim())

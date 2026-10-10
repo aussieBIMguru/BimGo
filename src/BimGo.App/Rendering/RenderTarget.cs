@@ -53,8 +53,9 @@ namespace BimGo.Rendering
 
             _depth = Gl.GenRenderbuffer();
             Gl.BindRenderbuffer(Gl.RENDERBUFFER, _depth);
-            Gl.RenderbufferStorageMultisample(Gl.RENDERBUFFER, samples, Gl.DEPTH_COMPONENT24, width, height);
-            Gl.FramebufferRenderbuffer(Gl.FRAMEBUFFER, Gl.DEPTH_ATTACHMENT, Gl.RENDERBUFFER, _depth);
+            // Depth with a stencil (section box caps)
+            Gl.RenderbufferStorageMultisample(Gl.RENDERBUFFER, samples, Gl.DEPTH24_STENCIL8, width, height);
+            Gl.FramebufferRenderbuffer(Gl.FRAMEBUFFER, Gl.DEPTH_STENCIL_ATTACHMENT, Gl.RENDERBUFFER, _depth);
 
             uint status = Gl.CheckFramebufferStatus(Gl.FRAMEBUFFER);
             Gl.BindRenderbuffer(Gl.RENDERBUFFER, 0);
@@ -91,6 +92,35 @@ namespace BimGo.Rendering
             Gl.BlitFramebuffer(0, 0, Width, Height, 0, 0, Width, Height, Gl.COLOR_BUFFER_BIT, Gl.NEAREST);
             Gl.BindFramebuffer(Gl.FRAMEBUFFER, 0);
         }
+
+        /// <summary>
+        /// Copies (resolving MSAA) this target's colour into another target of the same size (photo mode).
+        /// </summary>
+        public void ResolveTo(RenderTarget destination)
+        {
+            Gl.BindFramebuffer(Gl.READ_FRAMEBUFFER, _framebuffer);
+            Gl.BindFramebuffer(Gl.DRAW_FRAMEBUFFER, destination._framebuffer);
+            Gl.BlitFramebuffer(0, 0, Width, Height, 0, 0, destination.Width, destination.Height, Gl.COLOR_BUFFER_BIT, Gl.NEAREST);
+            Gl.BindFramebuffer(Gl.FRAMEBUFFER, 0);
+        }
+
+        /// <summary>
+        /// Reads this target's colour as bottom-up BGRA (single-sample targets only; resolve an MSAA one first).
+        /// </summary>
+        public unsafe void ReadPixels(byte[] bgra)
+        {
+            Gl.BindFramebuffer(Gl.READ_FRAMEBUFFER, _framebuffer);
+            Gl.ReadBuffer(Gl.COLOR_ATTACHMENT0);
+            Gl.PixelStore(Gl.PACK_ALIGNMENT, 1);
+            fixed (byte* p = bgra)
+            {
+                Gl.ReadPixels(0, 0, Width, Height, Gl.BGRA, Gl.UNSIGNED_BYTE, p);
+            }
+            Gl.BindFramebuffer(Gl.FRAMEBUFFER, 0);
+        }
+
+        /// <summary>True when the framebuffer was created and is complete.</summary>
+        public bool IsValid => _framebuffer != 0;
 
         /// <summary>
         /// Releases GL objects.

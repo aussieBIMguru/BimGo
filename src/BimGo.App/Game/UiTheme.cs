@@ -38,6 +38,19 @@ namespace BimGo.Game
         public static readonly uint COMMENT = Rgba.Hex(0xA78BFA);
         public static readonly uint COMMENT_LABEL = Rgba.Hex(0xC4B5FD);
 
+        /// <summary>Comment status colours: open (the comment colour), in progress (amber), closed (green).</summary>
+        public static readonly uint STATUS_OPEN = Rgba.Hex(0xA78BFA);
+        public static readonly uint STATUS_PROGRESS = Rgba.Hex(0xFBBF24);
+        public static readonly uint STATUS_CLOSED = Rgba.Hex(0x4ADE80);
+
+        /// <summary>The colour of a comment status.</summary>
+        public static uint StatusColour(string status) => status switch
+        {
+            Format.CommentStatus.IN_PROGRESS => STATUS_PROGRESS,
+            Format.CommentStatus.CLOSED => STATUS_CLOSED,
+            _ => STATUS_OPEN
+        };
+
         public static readonly uint SUN = Rgba.Hex(0xFBBF24);
         public static readonly uint SUN_LABEL = Rgba.Hex(0xFDE68A);
 
@@ -59,6 +72,9 @@ namespace BimGo.Game
 
         public static readonly uint CLONE = Rgba.Hex(0xA3E635);
         public static readonly uint CLONE_LABEL = Rgba.Hex(0xBEF264);
+
+        public static readonly uint PLACE = Rgba.Hex(0xFBBF24);
+        public static readonly uint PLACE_LABEL = Rgba.Hex(0xFCD34D);
 
         public static readonly uint AXIS_X = Rgba.Hex(0xF87171);
         public static readonly uint AXIS_Y = Rgba.Hex(0x4ADE80);

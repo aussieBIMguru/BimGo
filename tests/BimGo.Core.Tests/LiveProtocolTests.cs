@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using BimGo.Edits;
 using BimGo.Live;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -85,7 +86,20 @@ namespace BimGo.Tests
             Assert.AreEqual(1234, envelope.Read<HelloPayload>().AppPid);
             Assert.AreEqual("1.0.0", envelope.Read<HelloPayload>().AppVersion);
 
-            Assert.AreEqual(0, Directory.GetFiles(pair.ToRevit).Length, "Handled messages are deleted");
+            // Handled messages are deleted; a file Windows held for a moment (anti-virus, indexer) goes on a later scan
+            Assert.IsTrue(WaitUntilEmpty(pair.Revit, pair.ToRevit), "Handled messages are deleted");
+        }
+
+        /// <summary>Scans until the inbox is empty (up to 2 s): deletion can lag a moment on Windows.</summary>
+        private static bool WaitUntilEmpty(FolderChannel channel, string inbox)
+        {
+            for (int i = 0; i < 40; i++)
+            {
+                if (Directory.GetFiles(inbox).Length == 0) { return true; }
+                Thread.Sleep(50);
+                channel.Scan();
+            }
+            return Directory.GetFiles(inbox).Length == 0;
         }
 
         [TestMethod]

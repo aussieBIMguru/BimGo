@@ -180,6 +180,14 @@ namespace BimGo.Game
             {
                 // Only host elements are looked up by id: linked models have their own id namespaces and are read-only
                 ElementRecord record = scene.Elements[e];
+
+                // Family library templates are hidden for good (never drawn, picked or collided as themselves; the
+                // Place gun clones them) and have no Revit identity to look up
+                if (record.IsLibraryTemplate)
+                {
+                    _hidden[e] = true;
+                    continue;
+                }
                 if (record.IsLinked) { continue; }
                 _elementIndexById.TryAdd(record.ElementId, e);
                 if (!string.IsNullOrEmpty(record.UniqueId)) { _elementIndexByUniqueId.TryAdd(record.UniqueId, e); }
@@ -214,6 +222,9 @@ namespace BimGo.Game
             SnapMoveMm = LaunchSettings.NearestStep(LaunchSettings.SNAP_MOVE_STEPS_MM, settings.SnapMoveMm);
             SnapAngleDeg = LaunchSettings.NearestStep(LaunchSettings.SNAP_ANGLE_STEPS_DEG, settings.SnapAngleDeg);
             InitialiseCoordinates(settings.CoordinateReadout);
+            _bcfCoordinates = settings.BcfCoordinates;
+            if (LaunchSettings.TryParseColour(settings.SectionCapColour, out uint capRgb)) { SetCapColour(capRgb); }
+            _sectionNotice = null;
             InitialiseLights(settings);
         }
 
@@ -246,6 +257,7 @@ namespace BimGo.Game
             DrawLoadingFrame("Uploading geometry…");
             _renderer = new SceneRenderer { AutoProxy = _proxyMissing, ProxyMaterialColour = _proxyMaterialColour };
             _renderer.Initialise(Scene, _batches);
+            _renderer.Probes.SetOccluders(_bvh, ProbeOccluderMask());
             InitialiseTextures();
             if (_renderer.MaterialWarning != null) { Toast(_renderer.MaterialWarning, 6f); }
             else if (_realistic && !_renderer.HasMaterials)
@@ -291,10 +303,11 @@ namespace BimGo.Game
 
             _portalGun = new PortalGun(this);
             _commentGun = new CommentGun(this);
+            _placeGun = new PlaceGun(this);
             _guns = new Gun[]
             {
                 new ScanGun(this), new MeasureGun(this), _portalGun, _commentGun,
-                new TeleportGun(this), new HammerGun(this), new GizmoGun(this), new CloneGun(this)
+                new TeleportGun(this), new HammerGun(this), new GizmoGun(this), new CloneGun(this), _placeGun
             };
             for (int i = 0; i < _guns.Length; i++) { _guns[i].Key = (i + 1).ToString(); }
 
@@ -411,6 +424,22 @@ namespace BimGo.Game
             // Fallback: outside the model's south side, facing it
             yaw = MathF.PI * 0.5f;
             return new Vector3(centre.X, bounds.Min.Y - 5f, _groundZ);
+        }
+
+        /// <summary>
+        /// Elements that close a room boundary for reflection-probe blending (walls, glazing, columns…): everything
+        /// static except doors (always open to walk through) and movable furniture (it shouldn't decide whether two
+        /// rooms connect). Built once per snapshot; probe blending is decided when the probes are placed.
+        /// </summary>
+        private bool[] ProbeOccluderMask()
+        {
+            ElementRecord[] elements = Scene.Elements;
+            var mask = new bool[elements.Length];
+            for (int e = 0; e < elements.Length; e++)
+            {
+                mask[e] = !elements[e].Movable && elements[e].CategoryIndex != _doorCategory;
+            }
+            return mask;
         }
 
         /// <summary>
@@ -550,6 +579,27 @@ namespace BimGo.Game
                 return;
             }
 
+            // The sun hours study has the cursor: the player stands still, RMB-drag looks, clicks pick surfaces
+            if (_sunHoursOpen && !_paused)
+            {
+                UpdateSunHoursMode(input);
+                return;
+            }
+
+            // Photo mode has the cursor: RMB-drag looks, Enter shoots
+            if (_photoOpen && !_paused)
+            {
+                UpdatePhotoMode(input);
+                return;
+            }
+
+            // The section box editor has the cursor: RMB-drag looks, handles drag the cut
+            if (_sectionOpen && !_paused)
+            {
+                UpdateSectionEditor(input);
+                return;
+            }
+
             // The sun panel has the cursor: the player stands still and its keys take over
             if (_sunPanelOpen && !_paused)
             {
@@ -574,7 +624,7 @@ namespace BimGo.Game
             if (escape)
             {
                 if (captured) { current.OnCancel(); }
-                else if (_paused && (ClosePush() || CloseComments() || CloseBookmarks() || CloseTextures())) { /* back to the pause menu */ }
+                else if (_paused && (ClosePush() || CloseComments() || CloseBookmarks() || CloseTextures() || CloseLibrary() || CloseRooms())) { /* back to the pause menu */ }
                 else { SetPaused(!_paused); }
             }
             if (input.IsPressed(Vk.VK_F1)) { _showHelp = !_showHelp; }
@@ -599,6 +649,16 @@ namespace BimGo.Game
                 if (input.IsPressed('Y'))
                 {
                     Redo();
+                    return;
+                }
+                if (input.IsPressed('F') && !_paused)
+                {
+                    OpenRooms();
+                    return;
+                }
+                if (input.IsPressed('P') && !_paused)
+                {
+                    ClearSection();
                     return;
                 }
 
@@ -653,6 +713,22 @@ namespace BimGo.Game
                 return;
             }
             if (input.IsPressed('L')) { CycleCoordinateReadout(); }
+            if (input.IsPressed('J'))
+            {
+                OpenSunHours();
+                return;
+            }
+            if (input.IsPressed('M'))
+            {
+                OpenPhotoMode();
+                return;
+            }
+            if (input.IsPressed('P'))
+            {
+                if (input.IsDown(Vk.VK_SHIFT)) { QuickSectionPlane(); }
+                else { OpenSectionEditor(); }
+                return;
+            }
             if (input.IsPressed('K')) { CycleLightMode(); }
             if (input.IsPressed('O'))
             {
@@ -707,7 +783,7 @@ namespace BimGo.Game
         private void FixedUpdate(float dt)
         {
             _player.Controller.GroundZ = _groundZ;
-            bool frozen = IsEditingComment || _sunPanelOpen || !_window.IsActive || _guns[_activeGun].CapturesInput;
+            bool frozen = IsEditingComment || _sunPanelOpen || _sunHoursOpen || !_window.IsActive || _guns[_activeGun].CapturesInput;
             _player.FixedUpdate(dt, _window.Input, inputEnabled: !frozen);
             _portalGun.CheckTeleport(_player, dt);
         }
@@ -789,7 +865,7 @@ namespace BimGo.Game
         {
             _paused = paused;
             if (paused) { ShowUi(); } // e.g. focus lost while hidden: come back to a normal HUD
-            _window.SetCaptured(!paused && _window.IsActive && !_sunPanelOpen);
+            _window.SetCaptured(!paused && _window.IsActive && !_sunPanelOpen && !_sunHoursOpen);
             _window.Input.ReleaseAll();
         }
 
@@ -913,13 +989,42 @@ namespace BimGo.Game
         }
 
         /// <summary>
-        /// Picks against visible geometry: the static scene and moved / cloned elements.
+        /// Picks against visible geometry: the static scene and moved / cloned elements. Geometry the section cut
+        /// removes is passed through (tools ignore it; collision doesn't).
         /// </summary>
-        public bool Pick(Vector3 origin, Vector3 direction, float maxDistance, out RayHit hit)
+        public bool Pick(Vector3 origin, Vector3 direction, float maxDistance, out RayHit hit) =>
+            PickExcluding(origin, direction, maxDistance, null, out hit);
+
+        /// <summary>
+        /// Picks like <see cref="Pick"/> but ignores one moved / cloned element (drop to floor casts from inside the
+        /// element's own box). A moved original's static copy is already hidden, so only the instance needs leaving out.
+        /// Hits in geometry the section cut removes are skipped (the ray carries on past them).
+        /// </summary>
+        public bool PickExcluding(Vector3 origin, Vector3 direction, float maxDistance, DynamicInstance exclude, out RayHit hit)
+        {
+            if (_sectionCount == 0) { return PickOnce(origin, direction, maxDistance, exclude, out hit); }
+
+            float travelled = 0f;
+            for (int attempt = 0; attempt < 16 && travelled < maxDistance; attempt++)
+            {
+                if (!PickOnce(origin + direction * travelled, direction, maxDistance - travelled, exclude, out hit)) { return false; }
+                if (!SectionCut.IsCut(_sectionPlanes, _sectionCount, hit.Point))
+                {
+                    hit.Distance += travelled;
+                    return true;
+                }
+                travelled += hit.Distance + 0.002f;
+            }
+            hit = default;
+            return false;
+        }
+
+        /// <summary>One pick against the static scene and the moved / placed elements (the cut not considered).</summary>
+        private bool PickOnce(Vector3 origin, Vector3 direction, float maxDistance, DynamicInstance exclude, out RayHit hit)
         {
             bool hitStatic = _bvh.Raycast(origin, direction, maxDistance, _pickMask, out hit);
             float limit = hitStatic ? hit.Distance : maxDistance;
-            if (Dynamics != null && Dynamics.Raycast(origin, direction, limit, out RayHit dynamicHit))
+            if (Dynamics != null && Dynamics.Raycast(origin, direction, limit, out RayHit dynamicHit, exclude))
             {
                 hit = dynamicHit;
                 return true;
@@ -970,6 +1075,8 @@ namespace BimGo.Game
             settings.SnapMoveMm = SnapMoveMm;
             settings.SnapAngleDeg = SnapAngleDeg;
             settings.CoordinateReadout = _coordinateReadout;
+            settings.BcfCoordinates = _bcfCoordinates;
+            settings.SectionCapColour = $"#{_capRgb:X6}";
             settings.ShadowQuality = _shadowQuality;
             settings.Save();
         }
@@ -985,9 +1092,14 @@ namespace BimGo.Game
             _window.SetCaptured(false);
             _push?.Dispose();
             try { ReleaseThumbnails(); } catch (Exception ex) { Utilities.Log_Utils.Write($"Thumbnail cleanup failed: {ex.Message}"); }
+            try { ReleaseLibraryPreviews(); } catch (Exception ex) { Utilities.Log_Utils.Write($"Library preview cleanup failed: {ex.Message}"); }
             Sound.Dispose();
             _renderer?.Dispose();
             _overlay.Dispose();
+            _sunOverlay?.Dispose();
+            _sectionOverlay?.Dispose();
+            _photoTarget?.Dispose();
+            _photoResolve?.Dispose();
             _target.Dispose();
             _ui?.Dispose();
         }

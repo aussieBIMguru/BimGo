@@ -17,6 +17,7 @@ namespace BimGo.Format
     /// parameters.json   optional extra parameters (pooled strings)
     /// geometry.bin      header + SceneVertex[] (28 B each) + uint[] indices, little-endian
     /// comments.json     comment markers
+    /// comments/…        comment pictures for BCF snapshots (JPEG), referenced from comments.json (optional)
     /// journal.json      ordered edits (replayed on load; never baked into the geometry)
     /// bookmarks.json    saved viewpoints and the home viewpoint (optional; only written when there are some)
     /// sun.json          sun / shadow state: on/off, date, time, intensities (optional)
@@ -25,6 +26,8 @@ namespace BimGo.Format
     /// materials.json    material table for Realistic mode (optional; only when textures were extracted)
     /// material.bin      header + ushort material index per vertex + float2 surface coordinate (m) per vertex (optional)
     /// textures/…        embedded texture images (JPEG / PNG), referenced from materials.json (optional)
+    /// library.json      family library: offered family types and the first template vertex (optional; live sessions)
+    /// library/…         family library preview images (PNG), referenced from library.json (optional)
     /// </code>
     /// </summary>
     public static class BimGoFormat
@@ -74,6 +77,10 @@ namespace BimGo.Format
         internal const string ENTRY_LIGHTING = "lighting.json";
         internal const string ENTRY_MATERIALS = "materials.json";
         internal const string ENTRY_MATERIAL_STREAMS = "material.bin";
+        internal const string ENTRY_LIBRARY = "library.json";
+
+        /// <summary>The folder (entry name prefix) family library previews live under.</summary>
+        public const string LIBRARY_FOLDER = "library/";
 
         /// <summary>The folder (entry name prefix) embedded texture images live under.</summary>
         public const string TEXTURE_FOLDER = "textures/";

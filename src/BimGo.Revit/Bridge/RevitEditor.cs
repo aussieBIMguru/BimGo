@@ -58,6 +58,14 @@ namespace BimGo.Bridge
                 string refusal = CheckDocument(doc);
                 if (refusal != null) { return Fail(request, refusal); }
 
+                // A new instance from the family library: no target element
+                if (request.Op == EditOp.Place)
+                {
+                    EditResult placed = Place(doc, request, SessionPhases(doc), out ElementId placedId);
+                    if (placed.Success && request.NewCloneKey != 0) { _cloneIds[request.NewCloneKey] = placedId; }
+                    return placed;
+                }
+
                 // Resolve the target (clones made earlier this session are found by key)
                 ElementId id;
                 if (request.TargetCloneKey != 0)
@@ -231,6 +239,96 @@ namespace BimGo.Bridge
         }
 
         /// <summary>
+        /// Places a new instance of a family type (the family library): on the level at or below the point, then
+        /// moved so its location point is exactly where the walkthrough put it (however Revit read the point's
+        /// height), turned about the vertical through it, and put in the new phase. Level-based and work-plane / face-based
+        /// types (on the level's plane: <see cref="FamilyPlacer"/>); wall-hosted types are refused.
+        /// </summary>
+        private EditResult Place(Document doc, EditRequest request, PhasePair phases, out ElementId createdId)
+        {
+            createdId = ElementId.InvalidElementId;
+            FamilySymbol symbol = FindSymbol(doc, request.TypeUniqueId, request.TypeId);
+            if (symbol == null) { return Fail(request, "The family type is no longer loaded in the model"); }
+
+            if (!FamilyPlacer.CanPlace(FamilyPlacer.PlacementOf(symbol)))
+            {
+                return Fail(request, "Only level-based and work-plane-based families can be placed from BimGo");
+            }
+
+            XYZ point = ToFeet(request.Pivot);
+            Level level = LevelAtOrBelow(doc, point.Z);
+            if (level == null) { return Fail(request, "The model has no levels"); }
+
+            ElementId newId = ElementId.InvalidElementId;
+            ElementId phaseId = phases?.NewId ?? ElementId.InvalidElementId;
+            string error = RunTransaction(doc, request.Label, () =>
+            {
+                if (!symbol.IsActive)
+                {
+                    symbol.Activate();
+                    doc.Regenerate();
+                }
+                FamilyInstance instance = FamilyPlacer.Place(doc, symbol, level, point);
+                newId = instance.Id;
+                doc.Regenerate();
+
+                if (instance.Location is LocationPoint location)
+                {
+                    XYZ correction = point - location.Point;
+                    if (correction.GetLength() > 1e-6) { ElementTransformUtils.MoveElement(doc, newId, correction); }
+                }
+                if (MathF.Abs(request.Angle) > 1e-6f)
+                {
+                    ElementTransformUtils.RotateElement(doc, newId, DB.Line.CreateBound(point, point + XYZ.BasisZ), request.Angle);
+                }
+                if (phaseId != ElementId.InvalidElementId) { SetNewWork(doc.GetElement(newId), phaseId); }
+            });
+
+            createdId = newId;
+            if (error != null) { return Fail(request, error); }
+            return new EditResult
+            {
+                Ticket = request.Ticket,
+                Op = request.Op,
+                Success = true,
+                NewElementId = newId.Value,
+                CloneKey = request.NewCloneKey
+            };
+        }
+
+        /// <summary>
+        /// A family type by UniqueId, else by ElementId (null when neither finds a family type).
+        /// </summary>
+        private static FamilySymbol FindSymbol(Document doc, string uniqueId, long id)
+        {
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(uniqueId) && doc.GetElement(uniqueId) is FamilySymbol byUniqueId) { return byUniqueId; }
+                if (id > 0 && doc.GetElement(new ElementId(id)) is FamilySymbol byId) { return byId; }
+            }
+            catch (Exception ex)
+            {
+                Utilities.Log_Utils.Write($"Family type lookup failed: {ex.Message}");
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// The highest level at or just below a height (feet, internal), else the lowest level.
+        /// </summary>
+        private static Level LevelAtOrBelow(Document doc, double z)
+        {
+            List<Level> levels = new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>().OrderBy(l => l.ProjectElevation).ToList();
+            if (levels.Count == 0) { return null; }
+            Level best = levels[0];
+            foreach (Level level in levels)
+            {
+                if (level.ProjectElevation <= z + 0.01) { best = level; }
+            }
+            return best;
+        }
+
+        /// <summary>
         /// Puts a copy in the new phase and clears any demolition it inherited (inside the copy's transaction).
         /// A failure leaves the copy in its source's phase (logged, not fatal).
         /// </summary>
@@ -330,8 +428,9 @@ namespace BimGo.Bridge
 
         /// <summary>
         /// Deletes warnings so no dialog appears; any error rolls the transaction back (first message kept).
+        /// Also used by the family library's temporary (rolled-back) transaction.
         /// </summary>
-        private sealed class SwallowFailures : IFailuresPreprocessor
+        internal sealed class SwallowFailures : IFailuresPreprocessor
         {
             /// <summary>The first error's description, if any.</summary>
             public string FirstError { get; private set; }

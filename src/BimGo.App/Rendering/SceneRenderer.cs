@@ -59,6 +59,9 @@ namespace BimGo.Rendering
 
         /// <summary>How Revit's tint is drawn (Realistic mode only).</summary>
         public TintMode Tint;
+
+        /// <summary>Apply the section cut (<see cref="SceneRenderer.SetSection"/>): the player's view and highlights only.</summary>
+        public bool Section;
     }
 
     /// <summary>
@@ -68,7 +71,7 @@ namespace BimGo.Rendering
     /// <see cref="ScreenEffects"/>. Artificial lights (<see cref="ArtificialLighting"/>) and emissive surfaces are lit
     /// in the scene and ground shaders.
     /// </summary>
-    internal sealed unsafe class SceneRenderer : IDisposable
+    internal sealed unsafe partial class SceneRenderer : IDisposable
     {
         #region Fields
 
@@ -265,10 +268,12 @@ namespace BimGo.Rendering
         /// </summary>
         private struct GeometryUniforms
         {
-            public int ViewProj, Model, Eye, Right, Up, Forward;
+            public int ViewProj, Model, Eye, Right, Up, Forward, ClipCount, ClipPlanes;
 
             public static GeometryUniforms From(ShaderProgram p) => new()
             {
+                ClipCount = p.Uniform("uClipCount"),
+                ClipPlanes = p.Uniform("uClipPlanes"),
                 ViewProj = p.Uniform("uViewProj"),
                 Model = p.Uniform("uModel"),
                 Eye = p.Uniform("uEye"),
@@ -287,6 +292,7 @@ namespace BimGo.Rendering
             public int Realistic, Reflections, SkyZenith, SkyHorizon, TintMode;
             public int ReflectThreshold, ReflectGain, ReflectDebug, Time;
             public int ProbesOn, ProbeGridOrigin, ProbeGridCell, ProbeGridSize, ProbeMaxLod;
+            public int ClipCount, ClipPlanes;
 
             public static SceneUniforms From(ShaderProgram p)
             {
@@ -329,7 +335,9 @@ namespace BimGo.Rendering
                 ProbeGridOrigin = p.Uniform("uProbeGridOrigin"),
                 ProbeGridCell = p.Uniform("uProbeGridCell"),
                 ProbeGridSize = p.Uniform("uProbeGridSize"),
-                ProbeMaxLod = p.Uniform("uProbeMaxLod")
+                ProbeMaxLod = p.Uniform("uProbeMaxLod"),
+                ClipCount = p.Uniform("uClipCount"),
+                ClipPlanes = p.Uniform("uClipPlanes")
             };
         }
 
@@ -431,6 +439,8 @@ namespace BimGo.Rendering
             _drawOffsets = new nint[maxChunks];
 
             _emptyVao = Gl.GenVertexArray();
+            InitialiseSection();
+            InitialisePhoto();
             _shadows.Initialise();
             _effects.Initialise();
         }
@@ -867,6 +877,7 @@ namespace BimGo.Rendering
             _geometryProgram.Use();
             ApplyGeometry(_geometryUniforms, camera.ViewProjection, eye, right, up, forward);
             Gl.Uniform1(_geometryGlow, glow ? 1f : 0f);
+            ApplyClip(_geometryUniforms.ClipCount, _geometryUniforms.ClipPlanes, true);
             DrawBatches(camera.Planes, groupVisible, transparent: false, countStats: false);
             if (dynamics != null && dynamics.Instances.Count > 0) { DrawDynamicInstances(dynamics, camera.Planes, transparent: false, _geometryUniforms.Model); }
 
@@ -1280,6 +1291,7 @@ namespace BimGo.Rendering
             Gl.Uniform1(u.Whitecard, p.Whitecard ? 1 : 0);
             Gl.Uniform1(u.Plan, p.Plan ? 1 : 0);
             Gl.Uniform2(u.ClipZ, p.ClipZ.X, p.ClipZ.Y);
+            ApplyClip(u.ClipCount, u.ClipPlanes, p.Section);
             Gl.Uniform4(u.Override, overrideColour.X, overrideColour.Y, overrideColour.Z, overrideColour.W);
 
             bool realistic = p.Realistic && !p.Whitecard && HasMaterials;
@@ -1325,6 +1337,8 @@ namespace BimGo.Rendering
             _shadowTransmitProgram?.Dispose();
             _geometryProgram?.Dispose();
             _groundGeometryProgram?.Dispose();
+            DisposeSection();
+            DisposePhoto();
             _shadows.Dispose();
             _effects.Dispose();
             _lightShadows.Dispose();

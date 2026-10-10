@@ -75,13 +75,25 @@ namespace BimGo.Rendering
         /// <summary>Reflective surfaces are gathered on this voxel (m) before placement (keeps the planning fast).</summary>
         private const float VOXEL = 0.5f;
 
-        /// <summary>Lookup grid: plan cell and height band (m), grown when the grid would exceed <see cref="MAX_GRID_TEXELS"/>.</summary>
-        private const float GRID_CELL = 0.5f, GRID_BAND = 1f;
+        /// <summary>
+        /// Lookup grid: plan cell and height band (m), grown when the grid would exceed <see cref="MAX_GRID_TEXELS"/>.
+        /// Bands are 0.5 m (were 1 m) so a slab's cells don't reach into the room below.
+        /// </summary>
+        private const float GRID_CELL = 0.5f, GRID_BAND = 0.5f;
+
+        /// <summary>A cell centre this far (m) under a room's floor still belongs to it; above its top, this much headroom.</summary>
+        private const float FLOOR_TOLERANCE = 0.05f, ROOM_HEADROOM = 1f;
+
+        /// <summary>Two probes' cells this far apart (m, roomless cells between: a wall's thickness) still count as neighbours.</summary>
+        private const float OPEN_GAP = 1f;
+
+        /// <summary>Door boxes grow this much (m) in plan, and are bucketed on this plan grid (m).</summary>
+        private const float DOOR_GROW = 0.15f, DOOR_BUCKET = 2f;
 
         /// <summary>Most lookup cells.</summary>
         private const int MAX_GRID_TEXELS = 4_000_000;
 
-        /// <summary>Probes blend across room boundaries over about this distance (m) on each side.</summary>
+        /// <summary>Probes blend across open room boundaries (doorways, room separation lines) over about this distance (m) on each side.</summary>
         private const float BLEND_RADIUS = 1f;
 
         /// <summary>A probe baked with the player further than this (m) is provisional, refreshed once within <see cref="REFRESH_NEAR"/>.</summary>
@@ -122,6 +134,10 @@ namespace BimGo.Rendering
         private Vector3 _gridOrigin, _gridCell;
         private int _nx, _ny, _nz;
         private byte[] _gridData = Array.Empty<byte>();
+
+        // Occluders for the open-boundary test (static walls etc.; set by the session)
+        private BimGo.Physics.Bvh _occluders;
+        private bool[] _occluderMask;
 
         // GL
         private uint _array, _grid, _data, _fbo, _readFbo, _depth;
@@ -337,6 +353,17 @@ namespace BimGo.Rendering
         /// <summary>Forgets a failure so the next <see cref="Ensure"/> tries again (the user switched probes on again).</summary>
         public void ClearError() => LastError = null;
 
+        /// <summary>
+        /// The geometry that closes a room boundary for blending: the static BVH and a per-element mask (the session
+        /// leaves out doors and movable furniture). Takes effect at the next placement (a new snapshot or probe size);
+        /// without it only door boxes count as openings.
+        /// </summary>
+        public void SetOccluders(BimGo.Physics.Bvh bvh, bool[] mask)
+        {
+            _occluders = bvh;
+            _occluderMask = mask;
+        }
+
         #endregion
 
         #region Placement
@@ -364,7 +391,8 @@ namespace BimGo.Rendering
             var voxels = new Dictionary<(int, int, int), (Vector3 Sum, int Count)>();
             ushort[] index = materials.VertexMaterial;
             SceneVertex[] vertices = scene.Vertices;
-            for (int v = 0; v < vertices.Length; v++)
+            int modelVertices = scene.ModelVertexCount; // family library templates (hidden, after these) never get probes
+            for (int v = 0; v < modelVertices; v++)
             {
                 int m = index[v];
                 if (m >= shinyMaterial.Length || !shinyMaterial[m]) { continue; }
@@ -475,11 +503,25 @@ namespace BimGo.Rendering
         }
 
         /// <summary>
-        /// The lookup grid over the probes' boxes: each cell's probe (a room probe by containment, else the nearest
-        /// fallback probe whose box holds it), then a second probe and weight near boundaries for blending.
+        /// The lookup grid over the probes' boxes, built once per placement so nothing here costs per frame (next round:
+        /// probes no longer leak between rooms).
+        /// <list type="number">
+        /// <item><b>Rooms per cell:</b> every room, with a probe or not, claims the cells whose centre lies inside its
+        /// plan, and in height the room whose floor (<see cref="RoomInfo.BottomZ"/>) is the nearest below the cell centre
+        /// wins. A slab's cells belong to the room above it (the shader looks a ceiling up below it, in the room
+        /// underneath), and a room without a probe keeps its cells, so no neighbour or fallback probe shows in it.</item>
+        /// <item><b>Probe per cell:</b> the nearest probe of the cell's room (plan distance); cells in no room take the
+        /// nearest fallback probe whose box holds them.</item>
+        /// <item><b>Blending only through openings:</b> where two probes meet they blend over <see cref="BLEND_RADIUS"/>
+        /// only if the boundary is open: a short horizontal ray across it hits nothing in the occluder set (doors and
+        /// movable furniture are left out, see <see cref="SetOccluders"/>), or the gap lies inside a door's box. Probes
+        /// of one large room always blend. Walls get a hard change, which the shader's normal offset keeps on the
+        /// wall itself.</item>
+        /// </list>
         /// </summary>
         private void BuildGrid(SceneData scene)
         {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
             var bounds = Aabb.Empty;
             foreach (Probe probe in _probes) { bounds.Include(probe.Box); }
             if (scene.Bounds.IsValid)
@@ -500,16 +542,30 @@ namespace BimGo.Rendering
             }
             _gridOrigin = bounds.Min;
             _gridCell = new Vector3(cell, cell, band);
+            if (cell > GRID_CELL * 1.5f)
+            {
+                Utilities.Log_Utils.Write($"Reflection probes: the lookup grid grew to {cell:0.##} m cells × {band:0.##} m bands over " +
+                    $"{extent.X:0} × {extent.Y:0} × {extent.Z:0} m (cap {MAX_GRID_TEXELS:N0} cells): room edges are coarser on this model.");
+            }
 
             int total = _nx * _ny * _nz;
+            RoomInfo[] rooms = scene.Rooms ?? Array.Empty<RoomInfo>();
+            int[] roomOf = AssignRooms(rooms, total);
+
+            // Probe per cell: the room's nearest probe, else (outside rooms) the nearest fallback probe holding the cell
             var primary = new short[total];
             Array.Fill(primary, (short)-1);
-            RoomInfo[] rooms = scene.Rooms;
-
-            // Room probes: cells whose centre is inside the room's plan and whose band overlaps its height
+            var roomProbes = new Dictionary<int, List<int>>();
             for (int i = 0; i < _probes.Count; i++)
             {
                 Probe probe = _probes[i];
+                if (probe.Room >= 0)
+                {
+                    if (!roomProbes.TryGetValue(probe.Room, out List<int> list)) { roomProbes[probe.Room] = list = new List<int>(); }
+                    list.Add(i);
+                    continue;
+                }
+
                 (int x0, int y0, int z0, int x1, int y1, int z1) = CellRange(probe.Box);
                 for (int z = z0; z <= z1; z++)
                 {
@@ -518,38 +574,44 @@ namespace BimGo.Rendering
                         for (int x = x0; x <= x1; x++)
                         {
                             int c = (z * _ny + y) * _nx + x;
+                            if (roomOf[c] >= 0) { continue; }
                             Vector3 centre = CellCentre(x, y, z);
-                            if (probe.Room >= 0)
-                            {
-                                RoomInfo room = rooms[probe.Room];
-                                float bandLow = _gridOrigin.Z + z * _gridCell.Z, bandHigh = bandLow + _gridCell.Z;
-                                if (bandHigh < room.BottomZ - 0.3f || bandLow > room.TopZ + 0.3f) { continue; }
-                                if (!RoomIndex.Inside(room, new Vector2(centre.X, centre.Y))) { continue; }
-                                int current = primary[c];
-                                // Same room (large rooms): the nearest of its probes; another room's cell is kept
-                                if (current >= 0 && (_probes[current].Room != probe.Room ||
-                                    PlanDistance(_probes[current].Position, centre) <= PlanDistance(probe.Position, centre))) { continue; }
-                                primary[c] = (short)i;
-                            }
-                            else
-                            {
-                                int current = primary[c];
-                                if (current >= 0 && (_probes[current].Room >= 0 ||
-                                    Vector3.DistanceSquared(_probes[current].Position, centre) <= Vector3.DistanceSquared(probe.Position, centre))) { continue; }
-                                primary[c] = (short)i;
-                            }
+                            int current = primary[c];
+                            if (current >= 0 && Vector3.DistanceSquared(_probes[current].Position, centre) <= Vector3.DistanceSquared(probe.Position, centre)) { continue; }
+                            primary[c] = (short)i;
                         }
                     }
                 }
             }
+            for (int z = 0; z < _nz; z++)
+            {
+                for (int y = 0; y < _ny; y++)
+                {
+                    for (int x = 0; x < _nx; x++)
+                    {
+                        int c = (z * _ny + y) * _nx + x;
+                        if (roomOf[c] < 0 || !roomProbes.TryGetValue(roomOf[c], out List<int> list)) { continue; }
+                        Vector3 centre = CellCentre(x, y, z);
+                        int best = list[0];
+                        for (int k = 1; k < list.Count; k++)
+                        {
+                            if (PlanDistance(_probes[list[k]].Position, centre) < PlanDistance(_probes[best].Position, centre)) { best = list[k]; }
+                        }
+                        primary[c] = (short)best;
+                    }
+                }
+            }
 
-            // Blending: from every boundary cell, spread the neighbour's probe into cells of this probe within the radius
+            // Blending: only across open boundaries (or between the probes of one large room)
             var secondary = new short[total];
             var distance = new float[total];
             Array.Fill(secondary, (short)-1);
             Array.Fill(distance, float.MaxValue);
             int reach = Math.Max(1, (int)MathF.Ceiling(BLEND_RADIUS / cell));
             float radius = (reach + 0.5f) * cell;
+            int gap = Math.Max(1, (int)MathF.Ceiling(OPEN_GAP / cell));
+            Dictionary<(int, int), List<Aabb>> doors = DoorBoxes(scene);
+            int open = 0, closed = 0;
             for (int z = 0; z < _nz; z++)
             {
                 for (int y = 0; y < _ny; y++)
@@ -559,26 +621,30 @@ namespace BimGo.Rendering
                         int c = (z * _ny + y) * _nx + x;
                         int p = primary[c];
                         if (p < 0) { continue; }
-                        int q = Neighbour(primary, x + 1, y, z, p);
-                        if (q < 0) { q = Neighbour(primary, x - 1, y, z, p); }
-                        if (q < 0) { q = Neighbour(primary, x, y + 1, z, p); }
-                        if (q < 0) { q = Neighbour(primary, x, y - 1, z, p); }
-                        if (q < 0) { continue; }
 
-                        for (int dy = -reach; dy <= reach; dy++)
+                        // +X and +Y only: each boundary is found once and spread both ways. The neighbour may sit
+                        // across a few roomless cells (the wall's thickness).
+                        for (int axis = 0; axis < 2; axis++)
                         {
-                            for (int dx = -reach; dx <= reach; dx++)
+                            int dx = axis == 0 ? 1 : 0, dy = axis == 1 ? 1 : 0;
+                            for (int k = 1; k <= gap + 1; k++)
                             {
-                                int tx = x + dx, ty = y + dy;
-                                if (tx < 0 || ty < 0 || tx >= _nx || ty >= _ny) { continue; }
+                                int tx = x + dx * k, ty = y + dy * k;
+                                if (tx >= _nx || ty >= _ny) { break; }
                                 int t = (z * _ny + ty) * _nx + tx;
-                                if (primary[t] != p) { continue; }
-                                float d = MathF.Sqrt(dx * dx + dy * dy) * cell + 0.5f * cell;
-                                if (d < distance[t] && d < radius)
+                                int q = primary[t];
+                                if (q < 0) { continue; }
+                                if (q == p) { break; }
+
+                                bool sameRoom = roomOf[c] >= 0 && roomOf[c] == roomOf[t];
+                                if (sameRoom || IsOpen(CellCentre(x, y, z), CellCentre(tx, ty, z), roomOf[c], roomOf[t], rooms, doors))
                                 {
-                                    distance[t] = d;
-                                    secondary[t] = (short)q;
+                                    open++;
+                                    Spread(x, y, z, p, q);
+                                    Spread(tx, ty, z, q, p);
                                 }
+                                else { closed++; }
+                                break;
                             }
                         }
                     }
@@ -598,13 +664,133 @@ namespace BimGo.Rendering
                 }
                 _gridData[o + 3] = 255;
             }
+            Utilities.Log_Utils.Write($"Reflection probes: lookup grid {_nx}×{_ny}×{_nz} ({cell:0.##} m cells, {band:0.##} m bands), " +
+                $"{open:N0} open / {closed:N0} closed boundary cells ({(_occluders != null ? "rays" : "doors only")}, {doors.Count} door buckets) in {clock.ElapsedMilliseconds} ms.");
+
+            // Spreads probe 'other' into this probe's cells within the blend radius of the boundary cell (x, y, z)
+            void Spread(int x, int y, int z, int self, int other)
+            {
+                for (int dy = -reach; dy <= reach; dy++)
+                {
+                    for (int dx = -reach; dx <= reach; dx++)
+                    {
+                        int tx = x + dx, ty = y + dy;
+                        if (tx < 0 || ty < 0 || tx >= _nx || ty >= _ny) { continue; }
+                        int t = (z * _ny + ty) * _nx + tx;
+                        if (primary[t] != self) { continue; }
+                        float d = MathF.Sqrt(dx * dx + dy * dy) * cell + 0.5f * cell;
+                        if (d < distance[t] && d < radius)
+                        {
+                            distance[t] = d;
+                            secondary[t] = (short)other;
+                        }
+                    }
+                }
+            }
         }
 
-        private int Neighbour(short[] primary, int x, int y, int z, int self)
+        /// <summary>
+        /// The room of every lookup cell (-1 none): the cell centre inside the room's plan, and of the rooms there the
+        /// one whose floor is the nearest below the centre (within <see cref="FLOOR_TOLERANCE"/> under it, and no more
+        /// than <see cref="ROOM_HEADROOM"/> above its top: Revit rooms often stop below the ceiling). Host rooms win ties.
+        /// </summary>
+        private int[] AssignRooms(RoomInfo[] rooms, int total)
         {
-            if (x < 0 || y < 0 || x >= _nx || y >= _ny) { return -1; }
-            int q = primary[(z * _ny + y) * _nx + x];
-            return q >= 0 && q != self ? q : -1;
+            var roomOf = new int[total];
+            Array.Fill(roomOf, -1);
+            for (int r = 0; r < rooms.Length; r++)
+            {
+                RoomInfo room = rooms[r];
+                if (room?.Loops == null || room.Loops.Length == 0 || room.TopZ <= room.BottomZ) { continue; }
+                var box = new Aabb(new Vector3(room.Min, room.BottomZ - FLOOR_TOLERANCE), new Vector3(room.Max, room.TopZ + ROOM_HEADROOM));
+                if (!box.Overlaps(new Aabb(_gridOrigin, _gridOrigin + _gridCell * new Vector3(_nx, _ny, _nz)))) { continue; }
+                (int x0, int y0, int z0, int x1, int y1, int z1) = CellRange(box);
+                for (int y = y0; y <= y1; y++)
+                {
+                    for (int x = x0; x <= x1; x++)
+                    {
+                        Vector3 column = CellCentre(x, y, 0);
+                        if (!RoomIndex.Inside(room, new Vector2(column.X, column.Y))) { continue; }
+                        for (int z = z0; z <= z1; z++)
+                        {
+                            float cz = _gridOrigin.Z + (z + 0.5f) * _gridCell.Z;
+                            if (cz < room.BottomZ - FLOOR_TOLERANCE || cz > room.TopZ + ROOM_HEADROOM) { continue; }
+                            int c = (z * _ny + y) * _nx + x;
+                            int current = roomOf[c];
+                            if (current >= 0)
+                            {
+                                RoomInfo other = rooms[current];
+                                // The nearest floor below wins; on a tie the host room (then the first) stays
+                                if (other.BottomZ > room.BottomZ || (other.BottomZ == room.BottomZ && other.Link <= room.Link)) { continue; }
+                            }
+                            roomOf[c] = r;
+                        }
+                    }
+                }
+            }
+            return roomOf;
+        }
+
+        /// <summary>
+        /// True when the boundary between two neighbouring cells (centres <paramref name="a"/> and <paramref name="b"/>,
+        /// same height band) is open: the gap lies in a door's box, or a horizontal ray across it (from a quarter cell
+        /// before <paramref name="a"/> to a quarter cell past <paramref name="b"/>) hits no occluder. The ray runs at the
+        /// band's height, kept 0.15 m above the higher floor and below the lower top of the two rooms.
+        /// Without occluders (none set) only doors count as open.
+        /// </summary>
+        private bool IsOpen(Vector3 a, Vector3 b, int roomA, int roomB, RoomInfo[] rooms, Dictionary<(int, int), List<Aabb>> doors)
+        {
+            float low = float.MinValue, high = float.MaxValue;
+            if (roomA >= 0) { low = rooms[roomA].BottomZ; high = rooms[roomA].TopZ; }
+            if (roomB >= 0) { low = MathF.Max(low, rooms[roomB].BottomZ); high = MathF.Min(high, rooms[roomB].TopZ); }
+            float z = a.Z;
+            if (low > float.MinValue) { z = MathF.Max(z, low + 0.15f); }
+            if (high < float.MaxValue && high - 0.1f > low + 0.15f) { z = MathF.Min(z, high - 0.1f); }
+
+            Vector2 middle = (new Vector2(a.X, a.Y) + new Vector2(b.X, b.Y)) * 0.5f;
+            if (doors.TryGetValue(((int)MathF.Floor(middle.X / DOOR_BUCKET), (int)MathF.Floor(middle.Y / DOOR_BUCKET)), out List<Aabb> list))
+            {
+                foreach (Aabb door in list)
+                {
+                    if (middle.X >= door.Min.X && middle.X <= door.Max.X && middle.Y >= door.Min.Y && middle.Y <= door.Max.Y &&
+                        z >= door.Min.Z && z <= door.Max.Z) { return true; }
+                }
+            }
+            if (_occluders == null) { return false; }
+
+            var from = new Vector3(a.X, a.Y, z);
+            var to = new Vector3(b.X, b.Y, z);
+            Vector3 direction = to - from;
+            float length = direction.Length();
+            if (length < 1e-4f) { return true; }
+            direction /= length;
+            float pad = 0.25f * _gridCell.X;
+            return !_occluders.Raycast(from - direction * pad, direction, length + 2f * pad, _occluderMask, out _);
+        }
+
+        /// <summary>
+        /// Every door's box (host and links), grown by <see cref="DOOR_GROW"/> in plan so the wall's thickness around
+        /// the leaf counts, bucketed on a <see cref="DOOR_BUCKET"/> plan grid.
+        /// </summary>
+        private static Dictionary<(int, int), List<Aabb>> DoorBoxes(SceneData scene)
+        {
+            var buckets = new Dictionary<(int, int), List<Aabb>>();
+            int doorCategory = CategoryCatalog.Find(CategoryCatalog.KEY_DOORS)?.Index ?? -1;
+            if (doorCategory < 0 || scene.Elements == null) { return buckets; }
+            foreach (ElementRecord element in scene.Elements)
+            {
+                if (element.CategoryIndex != doorCategory || element.IsLibraryTemplate || !element.Bounds.IsValid) { continue; }
+                Aabb box = new(element.Bounds.Min - new Vector3(DOOR_GROW, DOOR_GROW, 0.05f), element.Bounds.Max + new Vector3(DOOR_GROW, DOOR_GROW, 0f));
+                for (int x = (int)MathF.Floor(box.Min.X / DOOR_BUCKET); x <= (int)MathF.Floor(box.Max.X / DOOR_BUCKET); x++)
+                {
+                    for (int y = (int)MathF.Floor(box.Min.Y / DOOR_BUCKET); y <= (int)MathF.Floor(box.Max.Y / DOOR_BUCKET); y++)
+                    {
+                        if (!buckets.TryGetValue((x, y), out List<Aabb> list)) { buckets[(x, y)] = list = new List<Aabb>(); }
+                        list.Add(box);
+                    }
+                }
+            }
+            return buckets;
         }
 
         private (int, int, int, int, int, int) CellRange(in Aabb box)
@@ -833,18 +1019,26 @@ namespace BimGo.Rendering
                 }
             }
 
+            /// <summary>
+            /// The room holding a point: of the rooms whose plan holds it and whose height (± 0.3 m) reaches it, the one
+            /// whose floor is the nearest below the point (within 5 cm), so a floor surface counts for the room above
+            /// the slab and a ceiling for the room below; else the first that reaches it with the tolerance. -1 none.
+            /// </summary>
             public int Find(Vector3 p)
             {
                 if (!_buckets.TryGetValue(((int)MathF.Floor(p.X / BUCKET), (int)MathF.Floor(p.Y / BUCKET)), out List<int> list)) { return -1; }
                 var plan = new Vector2(p.X, p.Y);
+                int best = -1, loose = -1;
                 foreach (int r in list)
                 {
                     RoomInfo room = _rooms[r];
                     if (p.Z < room.BottomZ - 0.3f || p.Z > room.TopZ + 0.3f) { continue; }
                     if (plan.X < room.Min.X || plan.Y < room.Min.Y || plan.X > room.Max.X || plan.Y > room.Max.Y) { continue; }
-                    if (Inside(room, plan)) { return r; }
+                    if (!Inside(room, plan)) { continue; }
+                    if (loose < 0) { loose = r; }
+                    if (p.Z >= room.BottomZ - 0.05f && (best < 0 || room.BottomZ > _rooms[best].BottomZ)) { best = r; }
                 }
-                return -1;
+                return best >= 0 ? best : loose;
             }
 
             /// <summary>Even-odd test over all the room's loops (islands are holes).</summary>

@@ -18,7 +18,13 @@ namespace BimGo.Edits
         Transform,
 
         /// <summary>Copy the element, then rotate and translate the copy.</summary>
-        Copy
+        Copy,
+
+        /// <summary>
+        /// Place a new instance of a family type (the family library) at <see cref="EditRequest.Pivot"/>, turned by
+        /// <see cref="EditRequest.Angle"/>. Additive to protocol 1: an older add-in can't read it (the app times out).
+        /// </summary>
+        Place
     }
 
     /// <summary>
@@ -43,10 +49,19 @@ namespace BimGo.Edits
         /// </summary>
         public int TargetCloneKey { get; init; }
 
-        /// <summary>For <see cref="EditOp.Copy"/>: the key the new element is registered under.</summary>
+        /// <summary>For <see cref="EditOp.Copy"/> and <see cref="EditOp.Place"/>: the key the new element is registered under.</summary>
         public int NewCloneKey { get; init; }
 
-        /// <summary>Rotation pivot (metres, Revit internal) before any translation.</summary>
+        /// <summary>For <see cref="EditOp.Place"/>: the family type's UniqueId (null otherwise).</summary>
+        public string TypeUniqueId { get; init; }
+
+        /// <summary>For <see cref="EditOp.Place"/>: the family type's ElementId value (fallback; 0 otherwise).</summary>
+        public long TypeId { get; init; }
+
+        /// <summary>
+        /// Rotation pivot (metres, Revit internal) before any translation. For <see cref="EditOp.Place"/>: where the
+        /// new instance's location point goes (no translation).
+        /// </summary>
         public Vector3 Pivot { get; init; }
 
         /// <summary>Translation applied after the rotation (metres).</summary>
@@ -79,10 +94,10 @@ namespace BimGo.Edits
         /// <summary>For delete / demolish: every element Revit deleted or demolished as a result (ElementId values).</summary>
         public long[] AffectedIds { get; init; } = Array.Empty<long>();
 
-        /// <summary>For copy: the new element's ElementId value.</summary>
+        /// <summary>For copy and place: the new element's ElementId value.</summary>
         public long NewElementId { get; init; }
 
-        /// <summary>For copy: the clone key from the request.</summary>
+        /// <summary>For copy and place: the clone key from the request.</summary>
         public int CloneKey { get; init; }
     }
 }

@@ -58,6 +58,12 @@ namespace BimGo.Physics
         /// <summary>Triangles (re-ordered so leaves are contiguous).</summary>
         public BvhTriangle[] Triangles { get; }
 
+        /// <summary>
+        /// Per triangle (same order as <see cref="Triangles"/>): true when it is glass (the element's transparent
+        /// range). Ray casts with <c>opaqueOnly</c> pass through these (sun hours: sun through glazing).
+        /// </summary>
+        public bool[] Transparent { get; }
+
         private readonly BvhNode[] _nodes;
         private readonly int[] _stack = new int[256];
 
@@ -75,18 +81,20 @@ namespace BimGo.Physics
 
             // Gather triangles element by element so each knows its owner
             var triangles = new BvhTriangle[indices.Length / 3];
+            var transparent = new bool[triangles.Length];
             int count = 0;
             for (int e = 0; e < elements.Length; e++)
             {
                 ElementRecord record = elements[e];
-                AddRange(record.OpaqueStart, record.OpaqueCount, e);
-                AddRange(record.TransparentStart, record.TransparentCount, e);
+                AddRange(record.OpaqueStart, record.OpaqueCount, e, false);
+                AddRange(record.TransparentStart, record.TransparentCount, e, true);
             }
 
-            void AddRange(int start, int length, int element)
+            void AddRange(int start, int length, int element, bool glass)
             {
                 for (int i = start; i + 2 < start + length; i += 3)
                 {
+                    transparent[count] = glass;
                     triangles[count++] = new BvhTriangle
                     {
                         A = vertices[indices[i]].Position,
@@ -160,8 +168,14 @@ namespace BimGo.Physics
 
             // Re-order triangles to match leaf ranges
             var sorted = new BvhTriangle[count];
-            for (int i = 0; i < count; i++) { sorted[i] = triangles[order[i]]; }
+            var sortedTransparent = new bool[count];
+            for (int i = 0; i < count; i++)
+            {
+                sorted[i] = triangles[order[i]];
+                sortedTransparent[i] = transparent[order[i]];
+            }
             Triangles = sorted;
+            Transparent = sortedTransparent;
         }
 
         private static float Component(Vector3 v, int axis) => axis == 0 ? v.X : axis == 1 ? v.Y : v.Z;
@@ -243,8 +257,9 @@ namespace BimGo.Physics
         /// <param name="maxDistance">Maximum distance.</param>
         /// <param name="mask">Per element: include? (null = all).</param>
         /// <param name="hit">The hit.</param>
+        /// <param name="opaqueOnly">True to pass through glass (transparent triangles).</param>
         /// <returns>True on a hit.</returns>
-        public bool Raycast(Vector3 origin, Vector3 direction, float maxDistance, bool[] mask, out RayHit hit)
+        public bool Raycast(Vector3 origin, Vector3 direction, float maxDistance, bool[] mask, out RayHit hit, bool opaqueOnly = false)
         {
             hit = default;
             if (Triangles.Length == 0) { return false; }
@@ -266,6 +281,7 @@ namespace BimGo.Physics
                     {
                         ref BvhTriangle t = ref Triangles[i];
                         if (mask != null && !mask[t.Element]) { continue; }
+                        if (opaqueOnly && Transparent[i]) { continue; }
                         if (GeoMath.RayTriangle(origin, direction, t.A, t.B, t.C, best, out float distance) && distance > 1e-4f)
                         {
                             best = distance;

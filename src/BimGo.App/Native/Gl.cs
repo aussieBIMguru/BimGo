@@ -63,6 +63,14 @@ namespace BimGo.Native
         public const uint TEXTURE_MAX_ANISOTROPY = 0x84FE, MAX_TEXTURE_MAX_ANISOTROPY = 0x84FF;
         public const uint MAX_ARRAY_TEXTURE_LAYERS = 0x88FF, MAX_TEXTURE_SIZE = 0x0D33;
 
+        // Section box caps (stencil in the scene target)
+        public const uint STENCIL_BUFFER_BIT = 0x00000400, STENCIL_TEST = 0x0B90;
+        public const uint KEEP = 0x1E00, INVERT = 0x150A, EQUAL = 0x0202;
+        public const uint DEPTH24_STENCIL8 = 0x88F0, DEPTH_STENCIL_ATTACHMENT = 0x821A;
+
+        // Photo mode (large off-screen targets, exposure blend)
+        public const uint MAX_RENDERBUFFER_SIZE = 0x84E8, DST_COLOR = 0x0306;
+
         #endregion
 
         #region Loading
@@ -79,7 +87,7 @@ namespace BimGo.Native
             "glDepthFunc", "glDepthMask", "glBlendFunc", "glCullFace", "glPolygonOffset", "glGetString",
             "glGetIntegerv", "glGetError", "glBindTexture", "glGenTextures", "glDeleteTextures", "glTexImage2D",
             "glTexParameteri", "glPixelStorei", "glDrawElements", "glDrawArrays", "glColorMask", "glDrawBuffer",
-            "glReadBuffer", "glReadPixels",
+            "glReadBuffer", "glReadPixels", "glStencilFunc", "glStencilOp", "glStencilMask", "glClearStencil",
 
             // GL 1.3+
             "glActiveTexture", "glMultiDrawElements", "glBlendFuncSeparate", "glTexImage3D", "glTexSubImage3D", "glGenerateMipmap",
@@ -172,6 +180,10 @@ namespace BimGo.Native
         public static uint GetError() => (uint)_gl.GetError();
         public static void PixelStore(uint name, int value) => _gl.PixelStore((GLEnum)name, value);
         public static void ColorMask(bool r, bool g, bool b, bool a) => _gl.ColorMask(r, g, b, a);
+        public static void StencilFunc(uint func, int reference, uint mask) => _gl.StencilFunc((GLEnum)func, reference, mask);
+        public static void StencilOp(uint stencilFail, uint depthFail, uint depthPass) => _gl.StencilOp((GLEnum)stencilFail, (GLEnum)depthFail, (GLEnum)depthPass);
+        public static void StencilMask(uint mask) => _gl.StencilMask(mask);
+        public static void ClearStencil(int value) => _gl.ClearStencil(value);
 
         public static int GetInteger(uint name)
         {

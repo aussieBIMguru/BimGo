@@ -51,6 +51,12 @@ namespace BimGo.Format
         public SunTime Sun { get; set; }
 
         /// <summary>
+        /// The section cut when the bookmark was set (section box round): GO restores it; a cut with nothing on
+        /// clears the cut; null (older bookmarks) leaves the current cut alone.
+        /// </summary>
+        public Scene.SectionCut Section { get; set; }
+
+        /// <summary>
         /// A small picture of the view (base64 JPEG, about 192 × 108 px, a few kB) for the bookmark list, or null.
         /// </summary>
         public string Thumbnail { get; set; }
@@ -102,6 +108,7 @@ namespace BimGo.Format
             {
                 if (string.IsNullOrWhiteSpace(bookmark.Name)) { bookmark.Name = "Viewpoint"; }
                 bookmark.Id = string.IsNullOrWhiteSpace(bookmark.Id) ? Guid.NewGuid().ToString("N") : bookmark.Id;
+                bookmark.Section?.Clean();
             }
             return this;
         }

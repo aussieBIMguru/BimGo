@@ -46,6 +46,33 @@ namespace BimGo.Platform
         }
 
         /// <summary>
+        /// Shows the Windows colour picker (full, with custom colours).
+        /// </summary>
+        /// <param name="owner">The owner window.</param>
+        /// <param name="rgb">The starting colour, 0xRRGGBB.</param>
+        /// <returns>The chosen colour (0xRRGGBB), or null if cancelled.</returns>
+        public static uint? PickColour(nint owner, uint rgb)
+        {
+            try
+            {
+                using var dialog = new WinForms.ColorDialog
+                {
+                    FullOpen = true,
+                    AnyColor = true,
+                    Color = System.Drawing.Color.FromArgb((int)((rgb >> 16) & 0xFF), (int)((rgb >> 8) & 0xFF), (int)(rgb & 0xFF))
+                };
+                if (dialog.ShowDialog(new Owner(owner)) != WinForms.DialogResult.OK) { return null; }
+                System.Drawing.Color c = dialog.Color;
+                return ((uint)c.R << 16) | ((uint)c.G << 8) | c.B;
+            }
+            catch (Exception ex)
+            {
+                Utilities.Log_Utils.Write($"Colour dialog failed: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
         /// Shows a folder picker (the modern Explorer-style dialog).
         /// </summary>
         /// <returns>The chosen folder, or null if cancelled.</returns>

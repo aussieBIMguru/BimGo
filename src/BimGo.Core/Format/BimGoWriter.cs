@@ -60,6 +60,7 @@ namespace BimGo.Format
                     WriteGeometry(zip, scene, geometryCompression, progress);
                     progress?.ThrowIfCancelled();
                     WriteJson(zip, BimGoFormat.ENTRY_COMMENTS, document.Comments ?? new CommentDocument(), BimGoFormat.JSON_INDENTED);
+                    WriteCommentSnapshots(zip, document.Comments);
                     var journal = new JournalDto { Entries = document.Journal?.Entries.ToList() ?? new List<JournalEntry>() };
                     WriteJson(zip, BimGoFormat.ENTRY_JOURNAL, journal, BimGoFormat.JSON_INDENTED);
 
@@ -79,6 +80,10 @@ namespace BimGo.Format
                     if (scene.Lighting != null && !scene.Lighting.IsEmpty)
                     {
                         WriteJson(zip, BimGoFormat.ENTRY_LIGHTING, BuildLighting(scene.Lighting), BimGoFormat.JSON_COMPACT);
+                    }
+                    if (scene.Library != null && !scene.Library.IsEmpty)
+                    {
+                        WriteLibrary(zip, scene);
                     }
                     MaterialData materials = document.Materials ?? scene.Materials;
                     if (materials != null && !materials.IsEmpty && materials.VertexMaterial.Length == scene.Vertices.Length)
@@ -235,6 +240,7 @@ namespace BimGo.Format
                 {
                     Id = record.ElementId,
                     UniqueId = string.IsNullOrEmpty(record.UniqueId) ? null : record.UniqueId,
+                    IfcGuid = string.IsNullOrEmpty(record.IfcGuid) ? null : record.IfcGuid,
                     Name = record.Name,
                     Category = record.CategoryIndex,
                     CategoryName = record.CategoryName,
@@ -250,7 +256,8 @@ namespace BimGo.Format
                     BoundsMin = record.Bounds.Min,
                     BoundsMax = record.Bounds.Max,
                     Opaque = record.OpaqueCount > 0 ? new[] { record.OpaqueStart, record.OpaqueCount } : null,
-                    Transparent = record.TransparentCount > 0 ? new[] { record.TransparentStart, record.TransparentCount } : null
+                    Transparent = record.TransparentCount > 0 ? new[] { record.TransparentStart, record.TransparentCount } : null,
+                    Library = record.IsLibraryTemplate ? true : null
                 });
             }
             return dto;
@@ -311,6 +318,46 @@ namespace BimGo.Format
                 if (name == null || !written.Add(name)) { continue; }
                 if (!name.StartsWith(BimGoFormat.TEXTURE_FOLDER, StringComparison.Ordinal)) { continue; }
                 if (!materials.Textures.TryGetValue(name, out byte[] bytes) || bytes == null || bytes.Length == 0) { continue; }
+                ZipArchiveEntry image = zip.CreateEntry(name, CompressionLevel.NoCompression);
+                using Stream stream = image.Open();
+                stream.Write(bytes);
+            }
+        }
+
+        /// <summary>
+        /// The comments' BCF pictures under comments/ (stored as-is: they are JPEG). Optional entries: older readers
+        /// ignore them.
+        /// </summary>
+        private static void WriteCommentSnapshots(ZipArchive zip, CommentDocument comments)
+        {
+            if (comments?.Comments == null) { return; }
+            var written = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (CommentRecord record in comments.Comments)
+            {
+                if (record?.SnapshotData == null || record.SnapshotData.Length == 0 || !CommentSnapshots.IsValidName(record.Snapshot)) { continue; }
+                if (!written.Add(record.Snapshot)) { continue; }
+                ZipArchiveEntry image = zip.CreateEntry(record.Snapshot, CompressionLevel.NoCompression);
+                using Stream stream = image.Open();
+                stream.Write(record.SnapshotData);
+            }
+        }
+
+        /// <summary>
+        /// library.json (the offered types and the first template vertex) and the preview images under library/
+        /// (stored as-is: already PNG).
+        /// </summary>
+        private static void WriteLibrary(ZipArchive zip, SceneData scene)
+        {
+            LibraryData library = scene.Library;
+            var dto = new LibraryDto { VertexStart = scene.ModelVertexCount, Entries = library.Entries.ToList() };
+            WriteJson(zip, BimGoFormat.ENTRY_LIBRARY, dto, BimGoFormat.JSON_COMPACT);
+
+            var written = new HashSet<string>(StringComparer.Ordinal);
+            foreach (LibraryEntry entry in library.Entries)
+            {
+                string name = entry?.Preview;
+                if (name == null || !written.Add(name) || !name.StartsWith(BimGoFormat.LIBRARY_FOLDER, StringComparison.Ordinal)) { continue; }
+                if (!library.Previews.TryGetValue(name, out byte[] bytes) || bytes == null || bytes.Length == 0) { continue; }
                 ZipArchiveEntry image = zip.CreateEntry(name, CompressionLevel.NoCompression);
                 using Stream stream = image.Open();
                 stream.Write(bytes);

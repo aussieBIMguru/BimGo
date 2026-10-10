@@ -77,15 +77,24 @@ namespace BimGo.Format
                 VisibilitySettings visibility = ReadJson<VisibilitySettings>(zip, BimGoFormat.ENTRY_VISIBILITY, required: false)?.Clean();
                 LightingDto lighting = ReadJson<LightingDto>(zip, BimGoFormat.ENTRY_LIGHTING, required: false);
                 MaterialsDto materials = ReadOptionalJson<MaterialsDto>(zip, BimGoFormat.ENTRY_MATERIALS);
+                LibraryDto library = ReadOptionalJson<LibraryDto>(zip, BimGoFormat.ENTRY_LIBRARY);
                 progress?.Step(0.1);
                 progress?.ThrowIfCancelled();
                 ReadGeometry(zip, out SceneVertex[] vertices, out uint[] indices, progress);
                 progress?.ThrowIfCancelled();
 
                 MaterialData materialData = ReadMaterials(zip, materials, vertices.Length);
-                SceneData scene = BuildScene(path, manifest, model, elements, parameters, vertices, indices, settings ?? new LaunchSettings(), lighting, materialData);
+                SceneData scene = BuildScene(path, manifest, model, elements, parameters, vertices, indices, settings ?? new LaunchSettings(), lighting, materialData,
+                    records => BuildLibrary(zip, library, records, vertices.Length));
                 comments.Comments ??= new List<CommentRecord>();
                 comments.Comments.RemoveAll(c => c == null || string.IsNullOrWhiteSpace(c.Text));
+                foreach (CommentRecord comment in comments.Comments)
+                {
+                    // BCF pictures (optional entries; a missing one leaves the comment without)
+                    if (!CommentSnapshots.IsValidName(comment.Snapshot)) { comment.Snapshot = null; continue; }
+                    comment.SnapshotData = ReadBytes(zip, comment.Snapshot);
+                    if (comment.SnapshotData == null) { comment.Snapshot = null; }
+                }
 
                 Utilities.Log_Utils.Write($"Read {path}: {scene.Elements.Length} elements, {scene.TriangleCount} triangles, " +
                     $"{comments.Comments.Count} comments, {journal.Entries?.Count ?? 0} journal entries, {bookmarks.Bookmarks.Count} bookmarks (format {manifest.FormatVersion}).");
@@ -115,7 +124,8 @@ namespace BimGo.Format
         #region Scene
 
         private static SceneData BuildScene(string path, ManifestDto manifest, ModelDto model, ElementsDto elementsDto, ParametersDto parametersDto,
-            SceneVertex[] vertices, uint[] indices, LaunchSettings settings, LightingDto lightingDto, MaterialData materials)
+            SceneVertex[] vertices, uint[] indices, LaunchSettings settings, LightingDto lightingDto, MaterialData materials,
+            Func<ElementRecord[], LibraryData> buildLibrary = null)
         {
             IReadOnlyList<CategoryDef> catalog = CategoryCatalog.All;
             int genericIndex = CategoryCatalog.Find(CategoryCatalog.KEY_GENERIC)?.Index ?? 0;
@@ -154,6 +164,7 @@ namespace BimGo.Format
                 {
                     ElementId = dto.Id,
                     UniqueId = dto.UniqueId ?? string.Empty,
+                    IfcGuid = IfcGuid.IsValid(dto.IfcGuid) ? dto.IfcGuid : string.Empty,
                     HostId = dto.HostId,
                     Name = dto.Name ?? "(unnamed)",
                     CategoryName = dto.CategoryName ?? catalog[category].Label,
@@ -170,8 +181,10 @@ namespace BimGo.Format
                     MoveBlockReason = dto.Movable ? null : (dto.MoveBlockReason ?? "Not movable"),
                     Pivot = dto.Pivot,
                     Phase = BimGoFormat.ParsePhaseRole(dto.Phase),
-                    Link = ValidLink(dto.Link, links.Length)
+                    Link = ValidLink(dto.Link, links.Length),
+                    IsLibraryTemplate = dto.Library == true
                 };
+                if (records[e].IsLibraryTemplate) { continue; } // hidden templates aren't part of the model's counts
                 counts[category]++;
                 loaded[category] = true;
             }
@@ -235,7 +248,7 @@ namespace BimGo.Format
             if (!bounds.IsValid)
             {
                 bounds = Aabb.Empty;
-                foreach (ElementRecord record in records) { bounds.Include(record.Bounds); }
+                foreach (ElementRecord record in records) { if (!record.IsLibraryTemplate) { bounds.Include(record.Bounds); } }
                 if (!bounds.IsValid) { bounds = new Aabb(new Vector3(-10, -10, 0), new Vector3(10, 10, 3)); }
             }
 
@@ -263,6 +276,7 @@ namespace BimGo.Format
                 Parameters = BuildParameters(parametersDto, records.Length),
                 Lighting = BuildLighting(lightingDto, vertices.Length, records.Length),
                 Materials = materials ?? MaterialData.Empty,
+                Library = buildLibrary?.Invoke(records) ?? LibraryData.Empty,
                 CategoryLoaded = loaded,
                 CategoryElementCounts = counts,
                 Settings = settings,
@@ -271,6 +285,64 @@ namespace BimGo.Format
                 SkippedCount = extraction.SkippedCount,
                 ExtractionTime = TimeSpan.FromSeconds(Math.Max(0, extraction.ExtractionSeconds))
             };
+        }
+
+        /// <summary>
+        /// The optional family library, validated: entries with a template must point at a template element (else
+        /// they are listed but not placeable), categories map onto this build's catalog (unknown ones are dropped),
+        /// previews are read once from library/. A damaged library is dropped, never failing the load.
+        /// </summary>
+        private static LibraryData BuildLibrary(ZipArchive zip, LibraryDto dto, ElementRecord[] records, int vertexCount)
+        {
+            if (dto?.Entries == null || dto.Entries.Count == 0) { return LibraryData.Empty; }
+            try
+            {
+                var entries = new List<LibraryEntry>();
+                var previews = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+                bool anyTemplate = false;
+                foreach (LibraryEntry entry in dto.Entries)
+                {
+                    if (entry == null || string.IsNullOrWhiteSpace(entry.TypeUniqueId)) { continue; }
+                    CategoryDef def = CategoryCatalog.Find(entry.Category);
+                    if (def == null) { continue; }
+                    entry.CategoryIndex = def.Index;
+                    entry.Family ??= string.Empty;
+                    entry.Type ??= string.Empty;
+                    entry.Placement ??= LibraryPlacement.OTHER;
+
+                    if (entry.Element >= 0 && (entry.Element >= records.Length || !records[entry.Element].IsLibraryTemplate))
+                    {
+                        entry.Element = -1;
+                    }
+                    if (entry.Element < 0 && entry.Placeable)
+                    {
+                        entry.Placeable = false;
+                        entry.Reason ??= "No geometry was captured for this type";
+                    }
+                    anyTemplate |= entry.Element >= 0;
+
+                    if (entry.Preview != null && !previews.ContainsKey(entry.Preview))
+                    {
+                        byte[] bytes = entry.Preview.StartsWith(BimGoFormat.LIBRARY_FOLDER, StringComparison.Ordinal) ? ReadBytes(zip, entry.Preview) : null;
+                        if (bytes != null) { previews[entry.Preview] = bytes; }
+                    }
+                    if (entry.Preview != null && !previews.ContainsKey(entry.Preview)) { entry.Preview = null; }
+                    entries.Add(entry);
+                }
+                if (entries.Count == 0) { return LibraryData.Empty; }
+
+                return new LibraryData
+                {
+                    Entries = entries.ToArray(),
+                    Previews = previews,
+                    VertexStart = anyTemplate ? Math.Clamp(dto.VertexStart, 0, vertexCount) : vertexCount
+                };
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Utilities.Log_Utils.Write($"Family library ignored (damaged): {ex.Message}");
+                return LibraryData.Empty;
+            }
         }
 
         /// <summary>

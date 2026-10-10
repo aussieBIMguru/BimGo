@@ -67,6 +67,24 @@ namespace BimGo.Rendering
         /// <summary>The frustum planes (a, b, c, d with inside >= 0).</summary>
         public readonly Vector4[] Planes = new Vector4[6];
 
+        // Photo mode: a view direction / up given outright (360 panorama faces, straight up and down)
+        private bool _customView;
+        private Vector3 _customForward, _customUp;
+
+        /// <summary>
+        /// Looks along a direction with a given up vector until <see cref="ClearCustomView"/> (yaw / pitch are ignored
+        /// meanwhile). Used for panorama faces, including straight up and down.
+        /// </summary>
+        public void SetCustomView(Vector3 forward, Vector3 up)
+        {
+            _customView = true;
+            _customForward = Vector3.Normalize(forward);
+            _customUp = Vector3.Normalize(up);
+        }
+
+        /// <summary>Back to yaw / pitch.</summary>
+        public void ClearCustomView() => _customView = false;
+
         /// <summary>
         /// Recomputes directions, matrices and planes.
         /// </summary>
@@ -79,12 +97,21 @@ namespace BimGo.Rendering
             Forward = new Vector3(cp * cy, cp * sy, sp);
             FlatForward = new Vector3(cy, sy, 0f);
             Right = new Vector3(sy, -cy, 0f);
+            Vector3 up = Vector3.UnitZ;
+            if (_customView)
+            {
+                Forward = _customForward;
+                up = _customUp;
+                Right = Vector3.Normalize(Vector3.Cross(_customForward, _customUp));
+                var flat = new Vector3(_customForward.X, _customForward.Y, 0f);
+                FlatForward = flat.LengthSquared() > 1e-6f ? Vector3.Normalize(flat) : new Vector3(-_customUp.X, -_customUp.Y, 0f);
+            }
 
             float hfov = HorizontalFovDegrees * MathF.PI / 180f;
             FovY = 2f * MathF.Atan(MathF.Tan(hfov * 0.5f) / MathF.Max(Aspect, 0.1f));
             PixelScale = 2f * MathF.Tan(FovY * 0.5f) / MathF.Max(ViewportHeight, 1f);
 
-            View = Matrix4x4.CreateLookAt(Position, Position + Forward, Vector3.UnitZ);
+            View = Matrix4x4.CreateLookAt(Position, Position + Forward, up);
             Projection = Perspective(FovY, Aspect, NEAR, FAR);
             ViewProjection = View * Projection;
             InverseViewProjection = Matrix4x4.Invert(ViewProjection, out Matrix4x4 inverse) ? inverse : Matrix4x4.Identity;

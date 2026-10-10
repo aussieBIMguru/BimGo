@@ -144,6 +144,17 @@ namespace BimGo.Game.Guns
             ui.Line(cx + 0.5f * u, cy + 3.5f * u, cx + 6.5f * u, cy + 3.5f * u, w, colour);
         }
 
+        /// <summary>Place: a box (a family) dropping onto a floor line, with a down arrow.</summary>
+        public static void Place(UiBatch ui, float cx, float cy, float size, uint colour)
+        {
+            float u = size / 24f, w = 2f * u;
+            ui.Line(cx - 10f * u, cy + 9f * u, cx + 10f * u, cy + 9f * u, w, Rgba.WithAlpha(colour, 0.7f));
+            ui.Rect(cx - 6f * u, cy - 1f * u, 12f * u, 8f * u, Rgba.WithAlpha(colour, 0.22f));
+            ui.Outline(cx - 6f * u, cy - 1f * u, 12f * u, 8f * u, w, colour);
+            ui.Line(cx, cy - 10f * u, cx, cy - 5f * u, w, colour);
+            Arrowhead(ui, cx, cy - 2.5f * u, 0f, 1f, 3.4f * u, colour);
+        }
+
         #endregion
 
         #region Helpers

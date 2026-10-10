@@ -1,0 +1,137 @@
+# BimGo: Handoff for a new chat (two feature rounds → hotkeys → polish → installer)
+
+**Context:** BimGo is Gavin's personal project (publisher **Aussie BIM Guru**, MIT, C# / Visual Studio, .NET 8,
+custom OpenGL renderer over Silk.NET). He works in **rounds**: discuss → stage questions with AskUserQuestion
+(recommended option first) → build → deliver a zip + `ai/<date>_<topic>/` notes + README + a project doc.
+
+**Read first:**
+1. This brief.
+2. `README.md`: *For AI assistants*, §3 controls, §5 how it works, §8 limitations / to verify, §9 history.
+3. The last three rounds' notes: `ai/261010a_BCF_SunHours`, `ai/261010b_SectionBox`, `ai/261010c_PhotoMode`.
+4. `claude/BimGo_Installer_Handoff.md` (project doc): the installer plan, decisions and open questions. Still valid.
+5. **Ask Gavin for a fresh zip of his working copy before editing.** His copy is the source of truth.
+
+---
+
+## 1. Where BimGo is now (all confirmed working by Gavin, 2026-10-10)
+
+| Round | What it added |
+|---|---|
+| BCF + sun hours (`261010a`) | Plain BCF 2.1 export / import of comments (`.bcf`, PNG snapshots, merge by GUID, shared / project / internal coordinates); sun study save / load |
+| Daylight (build B) | Study modes **Sun hours / Daylight % / Lux** (CIE overcast / clear sky + sun, 0.7 m editable work plane), general **PASS / FAIL** toggle (no regional terms), colour overrides |
+| Section box (`261010b`) | Box + one free plane, stencil caps in one flat user colour (picker), P / Shift+P / Ctrl+P, cuts saved in visibility, bookmarks, comment views and BCF clipping planes |
+| Photo mode (`261010c`) | M: clean frame, stills 1–4× (PNG / JPEG), 360° equirectangular 4K / 8K with Photo Sphere XMP, exposure ±3 EV, FOV, sun time, thirds grid, `Pictures\BimGo` + OPEN FOLDER |
+
+Minimap stays as is (no room names, no teleport from it).
+
+## 2. Plan for the next chat (agreed with Gavin, 2026-10-10)
+
+Features were reviewed and approved here. Build them in **two rounds**, then the hotkey review, polish and installer.
+Stage the detailed questions for each round with AskUserQuestion (recommendation first) before building.
+
+### Round A: presentation
+1. **Bookmark tour.** Plays the bookmarks in order, hands-free.
+   - **Transitions:** fade out / in between stops (Gavin's preference over flying between them). A glide option can
+     be offered, but fade is the default.
+   - **Optional swivel** at each stop: a slow pan, with an adjustable pace (and probably the pan angle and direction).
+   - **UI included or UI-free** toggle.
+   - **Hold time** per stop (time between changes); per-bookmark override is a question to ask.
+   - Start / stop / next / previous controls; Esc stops. Sections, sun time and visibility saved with each bookmark
+     apply at each stop.
+2. **Walkthrough video = record the tour.** One button renders the tour to **MP4** using its fades, pacing, swivel and
+   UI setting. Render off-screen at a fixed frame rate (not real time), so it's smooth on any PC; reuse photo mode's
+   `RenderScene(..., photo: true)` path and targets. Encode with **Windows Media Foundation** (H.264, in-box, no NuGet
+   package; P/Invoke or COM interop in BimGo.App). Questions: resolution (window / 1080p / 4K), frame rate (30 / 60),
+   output `Videos\BimGo` vs `Pictures\BimGo`, a progress bar with cancel.
+3. **Eye-height presets.** Standing (current), seated / wheelchair, child; a selector (pause menu and / or a key) and
+   a setting; collision, crouch and step-up stay correct. Heights editable; no regional standard names.
+
+### Round B: review tools + quality of life
+1. **Measure extras** (Measure gun): area (closed polyline on a plane), angle (three points), floor-to-ceiling
+   clearance (vertical from the aimed point). Keep N (normal projection); a mode key or RMB cycle is a question.
+2. **Snapshot markup:** draw arrows, circles / rectangles, freehand and text over a comment's picture before saving;
+   colour choice; undo. Burn the markup into the saved PNG (so BCF snapshots carry it); question whether to keep an
+   editable layer too.
+3. **Metric / imperial units:** one setting for measurements, coordinates, study heights / work plane, the section
+   panel and readouts. Imperial as feet-inches and decimal feet is a question; internal maths stays in metres.
+4. **Key rebinding:** an action map (actions → keys, with Shift / Ctrl variants) in settings, a **Controls** tab to
+   remap with conflict warnings and reset to defaults; F1 help and the README generated from the same map. This
+   builds the system; the hotkey review afterwards picks the **default** map.
+5. **Gamepad:** Xbox-style controllers via **XInput** (`xinput1_4.dll`, in-box, no package): move / look, jump,
+   crouch, run, gun select and fire, menus. It uses the same action map (rebindable is a question).
+6. **Start screen:** when BimGo opens without a file, recent `.bimgo` files with thumbnails, OPEN…, and the last
+   live session if one exists. Recent list kept in settings.
+
+### Then
+1. **Hotkey review:** choose the default keyboard and gamepad map with Gavin (§3 is the current map), then update
+   help and README §3.
+2. **Final polish:** small fixes Gavin raises, plus the open README §8 "to verify" items.
+3. **Installer:** follow `claude/BimGo_Installer_Handoff.md` (Inno Setup, per-user, self-contained app, Revit
+   2025 / 2026 / 2027 `.bundle`, no auto-update, no signing for 1.0). Its §4 questions are still open.
+
+**Considered and left out (Gavin, 2026-10-10):** phase before / after view, element search, headroom check.
+**Minimap stays as is.**
+
+## 3. Current key map (from code + README §3)
+
+**Global**
+
+| Key | Action |
+|---|---|
+| WASD / arrows, mouse | Move, look |
+| Space · Shift · Ctrl | Jump · run · crouch (fly: up / down) |
+| V | Fly / no-clip |
+| 1–9, wheel · LMB / RMB | Gun select · gun primary / secondary |
+| Page Up / Down | Teleport up / down a level |
+| H / Shift+H | Go home / set home |
+| B · Ctrl+1–9 | Bookmark view · jump to bookmark |
+| L | Coordinate readout (off → shared → project → internal) |
+| K | Artificial lights (off / glow / glow + light) |
+| O · Shift+O | Shadows · sun panel |
+| J | Sun / daylight study panel |
+| P · Shift+P · Ctrl+P | Section box editor · quick plane behind aimed surface · clear cuts |
+| [ / ] | Sun time −/+ 5 min (Shift: 1 min) |
+| M | Photo mode |
+| Tab | Minimap |
+| U | Hide UI |
+| X | Clear this gun's markers (Comment gun: twice = delete all) |
+| Ctrl+F | Find room |
+| Ctrl+S · Ctrl+Shift+S | Save · save as |
+| Ctrl+Z · Ctrl+Y / Ctrl+Shift+Z | Undo · redo |
+| F1 · F5 · F11 · F12 | Help · live refresh from Revit · fullscreen · quick screenshot |
+| Esc | Pause menu / cancel / close panel / show UI |
+
+**Gun-context keys:** N (Measure: normal projection), T (Demolish: demolish / delete), E (Comment: edit hovered),
+R / I / Shift+I (Scan: select in Revit / hide / isolate category), F (Gizmo aiming: drop onto surface).
+Gizmo / Clone / Place locked on: WASD plan move, E / Q up / down, R move ↔ rotate, G snap (Ctrl inverts), Z / X
+increment, F drop / lift, RMB commit, Esc cancel.
+
+**Panel-local keys:** photo mode (Enter shoot, RMB look, wheel FOV, [ ] sun, M / Esc close); section editor
+(drag handles, Shift = no snap, P / Esc close); study (RMB look, clicks pick surfaces).
+
+**Free plain letters:** **C** and **Y** only (Y is used only as Ctrl+Y). Plus unused function keys (F2–F4,
+F6–F10), Home / End / Insert / Delete, backtick, and most Alt combinations. Points for the review:
+E, F, R, X, Z, Q, G, T, N, I mean different things per gun / mode; O / Shift+O and J are related sun features on
+different letters; F12 screenshot vs M photo mode.
+
+## 4. Things to watch
+
+- `GameSession` and `SceneRenderer` are split across partial files: scan all partials for duplicate member names
+  before adding any.
+- The mode check order in `GameSession.Update` matters (photo → section editor → study → …); panels close each other
+  (`ClosePhotoMode`, etc.).
+- Shaders: check new / changed GLSL in headless WebGL2 (Playwright + Chromium) where possible; C# can't be compiled
+  in the sandbox, so say so.
+- For simple build errors Gavin wants **just the fix**, not a new zip.
+- No regional terminology in features or UI.
+
+## 5. Conventions (unchanged)
+
+- Readable, robust code, XML doc headers, explicit types where clearer; no per-frame allocations.
+- BimGo.Revit stays package-free; any new package needs Gavin's yes (README *For AI assistants*, §10).
+- No exceptions to the user: log via `Log_Utils.Write`, show a toast / dialog.
+- Revit API only in `Commands/`, `Extraction/`, `Bridge/RevitEditor*.cs`, `Live/LiveDispatcher.cs`.
+- `.bimgo` `formatVersion` 1 and live protocol 1 stay backward compatible.
+- Run the Core tests after any Core change.
+- Keep `README.md` and `ai/<date>_<topic>/` notes current; zip minus `bin/`, `obj/`, `.vs/`, `artifacts/`;
+  write a `claude/BimGo_<Round>_BuildNotes.md` project doc each round.

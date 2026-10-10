@@ -12,8 +12,9 @@ namespace BimGo.Game.Guns
     /// Gun 7: move / rotate loadable family instances (FFE). LMB on an eligible element locks the gizmo on in move
     /// mode: WASD move it relative to the view, E / Q raise / lower it. R switches to rotate mode: A / D turn it CCW /
     /// CW on the XY plane. Shift for fine control. G toggles snapping to fixed increments (Ctrl inverts while held);
-    /// Z / X step the current mode's increment. RMB commits (the same move and rotation are applied in Revit, or
-    /// recorded in the file); Esc cancels.
+    /// Z / X step the current mode's increment; F drops (or lifts) it onto the surface below. RMB commits (the same
+    /// move and rotation are applied in Revit, or recorded in the file); Esc cancels. F while only aiming drops the
+    /// aimed element and commits at once.
     /// </summary>
     internal sealed class GizmoGun : Gun
     {
@@ -36,7 +37,16 @@ namespace BimGo.Game.Guns
 
         public override void ClearMarkers() { }
 
-        public override void OnKeys(Platform.InputState input) => GizmoPanel.HandleKeys(Session, _gizmo, input);
+        public override void OnKeys(Platform.InputState input)
+        {
+            // Aim + F (not locked on): drop or lift the aimed element onto the surface below and commit it at once
+            if (!_gizmo.Active && input.IsPressed('F'))
+            {
+                DropAimed();
+                return;
+            }
+            GizmoPanel.HandleKeys(Session, _gizmo, input);
+        }
 
         public override void OnDeselect()
         {
@@ -65,20 +75,50 @@ namespace BimGo.Game.Guns
                 Session.Sound.Play(SoundId.Error);
                 return;
             }
+            if (LockOn(aim.Hit.Element, aim.Hit.DynamicId)) { Session.Sound.Play(SoundId.Grab); }
+        }
 
-            ElementRecord record = Session.Scene.Elements[aim.Hit.Element];
+        /// <summary>
+        /// Locks the gizmo on to an element (its moved / cloned instance when <paramref name="dynamicId"/> &gt; 0).
+        /// Refuses elements that can't move, with the reason.
+        /// </summary>
+        private bool LockOn(int element, int dynamicId)
+        {
+            ElementRecord record = Session.Scene.Elements[element];
             if (!record.Movable)
             {
                 Session.Sound.Play(SoundId.Error);
                 Session.Toast($"Can't move {record.Name}: {record.MoveBlockReason}", important: true);
-                return;
+                return false;
             }
 
-            DynamicInstance instance = aim.Hit.DynamicId > 0 ? Session.Dynamics.Find(aim.Hit.DynamicId) : Session.MakeDynamic(aim.Hit.Element);
-            if (instance == null) { return; }
-
+            DynamicInstance instance = dynamicId > 0 ? Session.Dynamics.Find(dynamicId) : Session.MakeDynamic(element);
+            if (instance == null) { return false; }
             _gizmo.Begin(instance);
-            Session.Sound.Play(SoundId.Grab);
+            return true;
+        }
+
+        /// <summary>
+        /// F while aiming (not locked on): locks on to the aimed element, drops or lifts it onto the first surface
+        /// below the bottom centre of its box, and commits that as one move (Ctrl+Z undoes it in a file). Nothing
+        /// below or already resting: nothing changes.
+        /// </summary>
+        private void DropAimed()
+        {
+            if (_hover < 0)
+            {
+                Session.Sound.Play(SoundId.Error);
+                Session.Toast("Aim at furniture or a fitting, then F drops it onto the surface below");
+                return;
+            }
+            if (!LockOn(_hover, _hoverDynamic)) { return; }
+            if (GizmoPanel.Drop(Session, _gizmo))
+            {
+                Commit();
+                return;
+            }
+            DynamicInstance released = _gizmo.Cancel();
+            Session.RestoreIfUnmoved(released);
         }
 
         public override void OnSecondary(in AimInfo aim)
@@ -181,13 +221,15 @@ namespace BimGo.Game.Guns
     internal static class GizmoPanel
     {
         /// <summary>
-        /// Keys shared by the Gizmo and Clone guns: G toggles snapping (any time the gun is selected); while locked on,
-        /// R switches move / rotate and Z / X step the current mode's increment (move distance or angle) down / up.
+        /// Keys shared by the Gizmo, Clone and Place guns: G toggles snapping (any time the gun is selected); while locked
+        /// on, R switches move / rotate, Z / X step the current mode's increment (move distance or angle) down / up and
+        /// F drops (or lifts) the element onto the first surface below the bottom centre of its box.
         /// </summary>
         public static void HandleKeys(GameSession session, GizmoController gizmo, Platform.InputState input)
         {
             if (input.IsPressed('G')) { session.ToggleGizmoSnap(); }
             if (!gizmo.Active) { return; }
+            if (input.IsPressed('F')) { Drop(session, gizmo); }
             if (input.IsPressed('R'))
             {
                 gizmo.ToggleMode();
@@ -196,6 +238,18 @@ namespace BimGo.Game.Guns
             bool rotating = gizmo.Mode == GizmoMode.Rotate;
             if (input.IsPressed('Z')) { if (rotating) { session.StepSnapAngle(-1); } else { session.StepSnapMove(-1); } }
             if (input.IsPressed('X')) { if (rotating) { session.StepSnapAngle(+1); } else { session.StepSnapMove(+1); } }
+        }
+
+        /// <summary>
+        /// F while locked on: drop or lift onto the surface below, with a sound and a note.
+        /// </summary>
+        /// <returns>True when the element moved.</returns>
+        public static bool Drop(GameSession session, GizmoController gizmo)
+        {
+            bool moved = gizmo.DropToSurface(out string message);
+            session.Sound.Play(moved ? Audio.SoundId.UiClick : Audio.SoundId.Error);
+            if (message != null) { session.Toast(moved ? message + " (RMB commits)" : message); }
+            return moved;
         }
 
         /// <summary>
@@ -242,7 +296,7 @@ namespace BimGo.Game.Guns
                     ui.Text(f.Body, x, y, "Shift fine · G snap on/off · Ctrl flips snap", UiTheme.TEXT_MUTED);
                 }
                 y += s(18);
-                ui.Text(f.Body, x, y, rotating ? "Z/X angle step" : "Z/X move step", UiTheme.TEXT_MUTED);
+                ui.Text(f.Body, x, y, rotating ? "Z/X angle step · F drop to surface" : "Z/X move step · F drop to surface", UiTheme.TEXT_MUTED);
                 y += s(18);
                 ui.Text(f.Body, x, y, "RMB commit · Esc cancel", UiTheme.TEXT_MUTED);
                 return;
@@ -267,7 +321,7 @@ namespace BimGo.Game.Guns
             y += s(22);
             ui.TextWrapped(f.Body, x, y, width, hovered.FamilyType, UiTheme.TEXT_SOFT, maxLines: 1);
             y += s(20);
-            if (hovered.Movable) { ui.Text(f.Body, x, y, "Movable: LMB locks on", UiTheme.GOOD); }
+            if (hovered.Movable) { ui.Text(f.Body, x, y, title == "GIZMO" ? "Movable: LMB locks on · F drops to surface" : "Movable: LMB clones", UiTheme.GOOD); }
             else
             {
                 TextBuffer reason = session.Text.Clear().Append("Can't move: ").Append(hovered.MoveBlockReason);

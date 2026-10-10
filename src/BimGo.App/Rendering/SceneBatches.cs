@@ -125,6 +125,7 @@ namespace BimGo.Rendering
                 {
                     ElementRecord record = elements[e];
                     if ((transparent ? record.TransparentCount : record.OpaqueCount) == 0) { continue; }
+                    if (record.IsLibraryTemplate) { continue; } // never drawn statically (see below)
                     int g = GroupOf(record);
                     if ((uint)g >= (uint)groupCount) { continue; }
                     (buckets[g] ??= new List<int>()).Add(e);
@@ -195,6 +196,25 @@ namespace BimGo.Rendering
                     batch.ChunkCount = chunks.Count - batch.ChunkStart;
                     batches.Add(batch);
                 }
+            }
+
+            // Family library templates: their indices go after every batch, in no chunk, so they are never drawn as
+            // part of the scene (shadows, minimap and probe captures included) but clones of them can be (the
+            // dynamic draw copies an element's range from here)
+            for (int e = 0; e < elements.Length; e++)
+            {
+                ElementRecord record = elements[e];
+                if (!record.IsLibraryTemplate) { continue; }
+                ElementRange range = default;
+                range.OpaqueStart = write;
+                range.OpaqueCount = record.OpaqueCount;
+                Array.Copy(source, record.OpaqueStart, indices, write, record.OpaqueCount);
+                write += record.OpaqueCount;
+                range.TransparentStart = write;
+                range.TransparentCount = record.TransparentCount;
+                Array.Copy(source, record.TransparentStart, indices, write, record.TransparentCount);
+                write += record.TransparentCount;
+                Ranges[e] = range;
             }
 
             Indices = indices;

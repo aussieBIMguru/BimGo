@@ -87,7 +87,7 @@ namespace BimGo.Game
         /// <summary>
         /// Adds a comment at a scene-local position and saves.
         /// </summary>
-        public CommentRecord Add(Vector3 local, string text, long elementId, string level)
+        public CommentRecord Add(Vector3 local, string text, long elementId, string level, string elementUniqueId = null)
         {
             var record = new CommentRecord
             {
@@ -96,6 +96,7 @@ namespace BimGo.Game
                 Y = Math.Round(local.Y + (double)_origin.Y, 4),
                 Z = Math.Round(local.Z + (double)_origin.Z, 4),
                 ElementId = elementId,
+                ElementUniqueId = string.IsNullOrEmpty(elementUniqueId) ? null : elementUniqueId,
                 Level = level ?? string.Empty
             };
             Prepare(record);
@@ -120,6 +121,150 @@ namespace BimGo.Game
             Prepare(record);
             Save();
             return true;
+        }
+
+        /// <summary>
+        /// Sets a comment's status, priority and / or assignee (null leaves a field alone; an empty assignee clears
+        /// it), recording who and when, and saves.
+        /// </summary>
+        /// <returns>False if the comment is not in this store or nothing changed.</returns>
+        public bool SetIssue(CommentRecord record, string status = null, string priority = null, string assignedTo = null)
+        {
+            if (record == null || !Comments.Contains(record)) { return false; }
+            bool changed = false;
+            if (status != null && CommentStatus.Normalise(status) != record.Status) { record.Status = CommentStatus.Normalise(status); changed = true; }
+            if (priority != null && CommentPriority.Normalise(priority) != record.Priority) { record.Priority = CommentPriority.Normalise(priority); changed = true; }
+            if (assignedTo != null)
+            {
+                string assignee = string.IsNullOrWhiteSpace(assignedTo) ? null : assignedTo.Trim();
+                if (assignee != record.AssignedTo) { record.AssignedTo = assignee; changed = true; }
+            }
+            if (!changed) { return false; }
+            record.Updated = DateTimeOffset.Now;
+            record.UpdatedBy = Environment.UserName;
+            record.UpdatedLabel = null;
+            Save();
+            return true;
+        }
+
+        /// <summary>
+        /// Adds a reply to a comment's thread and saves.
+        /// </summary>
+        /// <returns>The reply, or null (unknown comment or empty text).</returns>
+        public CommentReply AddReply(CommentRecord record, string text)
+        {
+            if (record == null || !Comments.Contains(record) || string.IsNullOrWhiteSpace(text)) { return null; }
+            var reply = new CommentReply { Text = text.Trim() };
+            (record.Replies ??= new List<CommentReply>()).Add(reply);
+            Save();
+            return reply;
+        }
+
+        /// <summary>
+        /// Removes a reply and saves.
+        /// </summary>
+        public void RemoveReply(CommentRecord record, CommentReply reply)
+        {
+            if (record?.Replies == null || !record.Replies.Remove(reply)) { return; }
+            if (record.Replies.Count == 0) { record.Replies = null; }
+            Save();
+        }
+
+        /// <summary>
+        /// Sets the viewpoint a comment is seen from (scene-local feet; stored in Revit internal metres) and saves.
+        /// The thumbnail follows separately (taken the next frame: <see cref="SetThumbnail"/>).
+        /// </summary>
+        public void SetView(CommentRecord record, Vector3 localFeet, float yaw, float pitch, bool flying, bool save = true, Scene.SectionCut section = null)
+        {
+            if (record == null) { return; }
+            record.View = new CommentView
+            {
+                X = Math.Round(localFeet.X + (double)_origin.X, 4),
+                Y = Math.Round(localFeet.Y + (double)_origin.Y, 4),
+                Z = Math.Round(localFeet.Z + (double)_origin.Z, 4),
+                Yaw = yaw,
+                Pitch = pitch,
+                Flying = flying,
+                Section = section?.Clone()
+            };
+            if (save && Comments.Contains(record)) { Save(); }
+        }
+
+        /// <summary>The scene-local feet of a comment's saved view (false when it has none).</summary>
+        public bool TryGetView(CommentRecord record, out Vector3 localFeet)
+        {
+            localFeet = Vector3.Zero;
+            if (record?.View == null) { return false; }
+            localFeet = new Vector3((float)(record.View.X - _origin.X), (float)(record.View.Y - _origin.Y), (float)(record.View.Z - _origin.Z));
+            return true;
+        }
+
+        /// <summary>
+        /// Stores a comment's thumbnail (base64 JPEG) and saves.
+        /// </summary>
+        public void SetThumbnail(CommentRecord record, string data)
+        {
+            if (record == null || string.IsNullOrEmpty(data)) { return; }
+            record.Thumbnail = data;
+            if (Comments.Contains(record)) { Save(); }
+        }
+
+        /// <summary>
+        /// Stores a comment's thumbnail (base64 JPEG) and, when given, the larger picture kept for BCF snapshots
+        /// (JPEG bytes, saved as comments/&lt;id&gt;.jpg), then saves once.
+        /// </summary>
+        public void SetPictures(CommentRecord record, string thumbnail, byte[] snapshot)
+        {
+            if (record == null) { return; }
+            if (!string.IsNullOrEmpty(thumbnail)) { record.Thumbnail = thumbnail; }
+            if (snapshot != null && snapshot.Length > 0)
+            {
+                record.Snapshot = CommentSnapshots.NameFor(record.Id);
+                record.SnapshotData = snapshot;
+                record.SnapshotDirty = true;
+            }
+            if (Comments.Contains(record)) { Save(); }
+        }
+
+        /// <summary>
+        /// Moves a comment's marker (scene-local) without saving: imports place markers before one save.
+        /// </summary>
+        public void SetMarker(CommentRecord record, Vector3 local)
+        {
+            if (record == null) { return; }
+            record.X = Math.Round(local.X + (double)_origin.X, 4);
+            record.Y = Math.Round(local.Y + (double)_origin.Y, 4);
+            record.Z = Math.Round(local.Z + (double)_origin.Z, 4);
+            record.Local = local;
+        }
+
+        /// <summary>
+        /// Finishes a BCF import with one save: new comments join the list, merged ones get their labels rebuilt.
+        /// </summary>
+        public void ApplyImport(IReadOnlyList<CommentRecord> added, IReadOnlyList<CommentRecord> merged)
+        {
+            foreach (CommentRecord record in added ?? Array.Empty<CommentRecord>())
+            {
+                if (record == null || string.IsNullOrWhiteSpace(record.Text) || Comments.Contains(record)) { continue; }
+                Prepare(record);
+                Comments.Add(record);
+            }
+            foreach (CommentRecord record in merged ?? Array.Empty<CommentRecord>())
+            {
+                if (record != null && Comments.Contains(record)) { Prepare(record); }
+            }
+            Save();
+        }
+
+        /// <summary>The comment with this id (case-insensitive), or null.</summary>
+        public CommentRecord Find(string id)
+        {
+            if (string.IsNullOrEmpty(id)) { return null; }
+            foreach (CommentRecord record in Comments)
+            {
+                if (string.Equals(record.Id, id, StringComparison.OrdinalIgnoreCase)) { return record; }
+            }
+            return null;
         }
 
         /// <summary>
@@ -158,53 +303,9 @@ namespace BimGo.Game
             return saved;
         }
 
-        /// <summary>
-        /// Writes every comment to a CSV file (UTF-8 with BOM so Excel reads accents). Coordinates are Revit internal
-        /// metres, as stored.
-        /// </summary>
-        /// <returns>Null on success, else a short reason.</returns>
-        public string ExportCsv(string path)
-        {
-            try
-            {
-                var lines = new List<string> { "Id,Author,Created,Edited,Edited by,Level,Element id,X (m),Y (m),Z (m),Text" };
-                foreach (CommentRecord record in Comments)
-                {
-                    lines.Add(string.Join(",",
-                        record.Id,
-                        Csv(record.Author),
-                        record.Created.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture),
-                        record.Edited?.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture) ?? string.Empty,
-                        Csv(record.EditedBy),
-                        Csv(record.Level),
-                        record.ElementId > 0 ? record.ElementId.ToString(CultureInfo.InvariantCulture) : string.Empty,
-                        record.X.ToString("0.###", CultureInfo.InvariantCulture),
-                        record.Y.ToString("0.###", CultureInfo.InvariantCulture),
-                        record.Z.ToString("0.###", CultureInfo.InvariantCulture),
-                        Csv(record.Text)));
-                }
-                File.WriteAllLines(path, lines, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
-                return null;
-            }
-            catch (Exception ex)
-            {
-                Utilities.Log_Utils.Write($"Comment export failed: {ex}");
-                return ex.Message;
-            }
-        }
-
-        /// <summary>
-        /// Quotes a CSV field when needed.
-        /// </summary>
-        private static string Csv(string value)
-        {
-            value ??= string.Empty;
-            bool quote = value.IndexOfAny(new[] { ',', '"', '\n', '\r' }) >= 0;
-            return quote ? "\"" + value.Replace("\"", "\"\"") + "\"" : value;
-        }
-
         private void Prepare(CommentRecord record)
         {
+            record.Clean();
             record.Local = new Vector3((float)(record.X - _origin.X), (float)(record.Y - _origin.Y), (float)(record.Z - _origin.Z));
             string edited = record.Edited.HasValue ? " · EDITED" : string.Empty;
             record.Header = $"COMMENT · {record.Author?.ToUpperInvariant()} · {record.Created.ToLocalTime():dd MMM HH:mm}{edited}";

@@ -61,7 +61,7 @@ namespace BimGo.Game
         private void AddBookmarkHere()
         {
             if (_player == null) { return; }
-            BookmarkRecord record = Bookmarks.CreatePending(null, _player.Feet, _player.Yaw, _player.Pitch, _player.Flying, CurrentLevelName, BookmarkSunTime());
+            BookmarkRecord record = Bookmarks.CreatePending(null, _player.Feet, _player.Yaw, _player.Pitch, _player.Flying, CurrentLevelName, BookmarkSunTime(), _section);
             _thumbnailFor = record;
             Sound.Play(SoundId.CommentPlace);
             BeginBookmarkRename(record, isNew: true);
@@ -111,6 +111,7 @@ namespace BimGo.Game
         {
             if (record == null || _player == null) { return; }
             if (record.Sun != null) { ApplySunTime(record.Sun); }
+            if (record.Section != null) { ApplySection(record.Section, announce: false); }
             if (record.Flying != _player.Flying) { _player.ToggleFly(); }
             _player.TeleportTo(record.Local, record.Yaw, Math.Clamp(record.Pitch, -1.5f, 1.5f));
             Sound.Play(SoundId.Teleport);
@@ -191,7 +192,7 @@ namespace BimGo.Game
             if (_bookmarksNotice != null) { _ui.TextWrapped(f.Body, ix, buttonsY - S(30), iw, _bookmarksNotice, UiTheme.MEASURE_TEXT, maxLines: 1); }
             if (MenuButton(f, ix, buttonsY, S(240), "ADD THIS VIEW", false, false))
             {
-                BookmarkRecord added = Bookmarks.Add(null, _player.Feet, _player.Yaw, _player.Pitch, _player.Flying, CurrentLevelName, BookmarkSunTime());
+                BookmarkRecord added = Bookmarks.Add(null, _player.Feet, _player.Yaw, _player.Pitch, _player.Flying, CurrentLevelName, BookmarkSunTime(), _section);
                 _thumbnailFor = added;
                 _bookmarksNotice = Bookmarks.LastError ?? $"Added “{added.Name}” (RENAME to change it)";
                 _bookmarkScroll = Bookmarks.Bookmarks.Count; // show the end of the list (clamped while drawing)
@@ -285,7 +286,7 @@ namespace BimGo.Game
             }
             else if (here != null)
             {
-                Bookmarks.Update(here, _player.Feet, _player.Yaw, _player.Pitch, _player.Flying, CurrentLevelName, BookmarkSunTime());
+                Bookmarks.Update(here, _player.Feet, _player.Yaw, _player.Pitch, _player.Flying, CurrentLevelName, BookmarkSunTime(), _section);
                 _thumbnailFor = here;
                 _bookmarksNotice = Bookmarks.LastError ?? $"“{here.Name}” now points at where you are";
                 Sound.Play(SoundId.Commit);

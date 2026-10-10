@@ -72,7 +72,7 @@ namespace BimGo.Game
         /// </summary>
         public void SetStaticHidden(int element, bool hidden)
         {
-            if (_hidden[element] == hidden) { return; }
+            if (_hidden[element] == hidden || Scene.Elements[element].IsLibraryTemplate) { return; }
             _hidden[element] = hidden;
             _sceneRevision++;
             _renderer.SetElementHidden(element, hidden || _userHidden[element]);

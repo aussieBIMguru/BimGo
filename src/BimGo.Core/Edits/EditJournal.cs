@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Text.Json.Serialization;
 
 // The class belongs to the Edits namespace
 namespace BimGo.Edits
@@ -16,6 +17,16 @@ namespace BimGo.Edits
 
         /// <summary>The element was copied, then the copy rotated and moved.</summary>
         public const string CLONE = "clone";
+
+        /// <summary>
+        /// A new instance of a family type (the family library) was placed at <see cref="JournalEntry.Pivot"/>, turned
+        /// by <see cref="JournalEntry.Angle"/>; <see cref="JournalEntry.TypeUniqueId"/> names the type and
+        /// <see cref="JournalEntry.NewCloneKey"/> the new instance (later moves target it like a clone).
+        /// </summary>
+        public const string PLACE = "place";
+
+        /// <summary>True for the ops that create a new instance with a clone key (clone, place).</summary>
+        public static bool Creates(string op) => op == CLONE || op == PLACE;
 
         /// <summary><see cref="HIDE"/> mode: Phase Demolished set to the session phase.</summary>
         public const string MODE_DEMOLISH = "demolish";
@@ -52,8 +63,15 @@ namespace BimGo.Edits
         /// <summary>When non-zero, the target (or clone source) is the walkthrough clone with this key.</summary>
         public int TargetCloneKey { get; set; }
 
-        /// <summary>For clone: the key of the new copy (unique within the file).</summary>
+        /// <summary>For clone and place: the key of the new instance (unique within the file).</summary>
         public int NewCloneKey { get; set; }
+
+        /// <summary>For place: the family type's UniqueId (null otherwise, and not written).</summary>
+        public string TypeUniqueId { get; set; }
+
+        /// <summary>For place: the family type's ElementId value (0 otherwise, and not written).</summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        public long TypeId { get; set; }
 
         /// <summary>Rotation pivot before the move (Revit internal metres).</summary>
         public Vector3 Pivot { get; set; }
@@ -76,7 +94,7 @@ namespace BimGo.Edits
         /// <summary>True if the edit was also committed to a live Revit model when it was made.</summary>
         public bool AppliedToRevit { get; set; }
 
-        /// <summary>For clones committed to Revit: the new element's ElementId value (0 otherwise).</summary>
+        /// <summary>For clones and placements committed to Revit: the new element's ElementId value (0 otherwise).</summary>
         public long RevitElementId { get; set; }
     }
 

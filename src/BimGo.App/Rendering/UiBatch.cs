@@ -18,6 +18,13 @@ namespace BimGo.Rendering
             return r | (g << 8) | (b << 16) | (a << 24);
         }
 
+        /// <summary>Packs from 0..1 components (clamped).</summary>
+        public static uint FromFloat(float r, float g, float b, float a)
+        {
+            static uint Byte(float v) => (uint)Math.Clamp((int)(v * 255f + 0.5f), 0, 255);
+            return Byte(r) | (Byte(g) << 8) | (Byte(b) << 16) | (Byte(a) << 24);
+        }
+
         /// <summary>Replaces the alpha of a packed colour.</summary>
         public static uint WithAlpha(uint colour, float alpha)
         {

@@ -142,6 +142,22 @@ namespace BimGo.Format
             System.IO.Path.Combine(root ?? DefaultRoot, FolderNameFor(title, keySource));
 
         /// <summary>
+        /// The key source for a model known only from a file's provenance (sun hours round 2: saved studies of a
+        /// .bimgo): "cloud:&lt;project&gt;/&lt;model&gt;" as the live session builds it, else "local:&lt;model path&gt;", else
+        /// "file:&lt;the .bimgo path&gt;". A workshared model's live folder is keyed by its central path, which files
+        /// don't record, so its file studies land in the local copy's folder instead.
+        /// </summary>
+        public static string KeySourceFor(Scene.ModelProvenance provenance, string filePath)
+        {
+            if (provenance != null && provenance.IsCloud && !string.IsNullOrWhiteSpace(provenance.CloudProjectId) && !string.IsNullOrWhiteSpace(provenance.CloudModelId))
+            {
+                return $"cloud:{provenance.CloudProjectId.Trim()}/{provenance.CloudModelId.Trim()}";
+            }
+            if (!string.IsNullOrWhiteSpace(provenance?.ModelPath)) { return "local:" + provenance.ModelPath.Trim(); }
+            return "file:" + (filePath ?? string.Empty);
+        }
+
+        /// <summary>
         /// The model folder a comments path sits in, or null when the path is an old-style sidecar (beside a model or in
         /// the old Comments folder) or empty.
         /// </summary>

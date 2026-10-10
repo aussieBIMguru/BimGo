@@ -7,6 +7,93 @@ namespace BimGo.Rendering
     /// </summary>
     internal static class Shaders
     {
+        #region Section cut (section box round)
+
+        /// <summary>
+        /// The section cut, shared by the scene and geometry pre-pass fragment shaders (after their #version line):
+        /// up to 7 planes (n, d) in scene-local coordinates; a point with n·p > d is cut away. uClipCount 0 = no cut
+        /// (the default for passes that ignore it: shadows, probes, the minimap).
+        /// </summary>
+        public const string CLIP_GLSL = @"
+uniform int uClipCount;
+uniform vec4 uClipPlanes[7];
+bool sectionCut(vec3 p)
+{
+    for (int i = 0; i < uClipCount; i++)
+    {
+        if (dot(uClipPlanes[i].xyz, p) > uClipPlanes[i].w) return true;
+    }
+    return false;
+}
+";
+
+        /// <summary>
+        /// Section caps, stencil pass (vertex shader: <see cref="SCENE_VS"/>): the scene cut by one plane only, written
+        /// to the stencil (INVERT) with no colour; pixels left odd look into a solid the plane cuts.
+        /// With uCapColour.a > 0 (element-colour caps, drawn on back faces) it writes the surface's own colour, darkened.
+        /// </summary>
+        public const string CAP_STENCIL_FS = @"#version 330 core
+in vec3 vWorld;
+in vec4 vColor;
+uniform vec4 uCapPlane;
+uniform float uCapShade;
+out vec4 oColor;
+void main()
+{
+    if (dot(uCapPlane.xyz, vWorld) > uCapPlane.w) discard;
+    oColor = vec4(vColor.rgb * uCapShade, 1.0);
+}";
+
+        /// <summary>Section caps, cap polygon: a face of the box or the free plane, positions in scene-local metres.</summary>
+        public const string CAP_VS = @"#version 330 core
+layout(location = 0) in vec3 aPos;
+uniform mat4 uViewProj;
+out vec3 vWorld;
+void main()
+{
+    vWorld = aPos;
+    gl_Position = uViewProj * vec4(aPos, 1.0);
+}";
+
+        /// <summary>
+        /// Section caps, cap polygon fragment shader: cut by every other plane of the cut (uSkip is its own), flat
+        /// colour.
+        /// </summary>
+        public const string CAP_FS = "#version 330 core\n" + @"
+uniform int uClipCount;
+uniform vec4 uClipPlanes[7];
+uniform int uSkip;
+uniform vec4 uColor;
+in vec3 vWorld;
+out vec4 oColor;
+void main()
+{
+    for (int i = 0; i < uClipCount; i++)
+    {
+        if (i != uSkip && dot(uClipPlanes[i].xyz, vWorld) > uClipPlanes[i].w + 0.0005) discard;
+    }
+    oColor = uColor;
+}";
+
+        #endregion
+
+        #region Photo mode
+
+        /// <summary>
+        /// Photo exposure (vertex shader: <see cref="FULLSCREEN_VS"/>): a flat colour blended over the scene with
+        /// glBlendFunc(DST_COLOR, ZERO) (darker: colour = factor) or (DST_COLOR, ONE) (brighter: colour = factor − 1).
+        /// </summary>
+        public const string EXPOSURE_FS = @"#version 330 core
+in vec2 vNdc;
+uniform vec3 uColor;
+out vec4 oColor;
+void main()
+{
+    oColor = vec4(uColor, 1.0);
+}";
+
+        #endregion
+
         #region Scene (static batches; uModel is identity except for moved / cloned elements)
 
         /// <summary>
@@ -191,11 +278,14 @@ vec3 waterNormal(vec3 world, vec3 n, float amount, float dist)
     return normalize(n + vec3(-slope, 0.0));
 }
 
-// The probes at a point: x = first probe (-1 = none: the sky), y = second (-1 none), z = the second's weight
-vec3 probeCell(vec3 world)
+// The probes at a surface point: x = first probe (-1 = none: the sky), y = second (-1 none), z = the second's weight.
+// The cell is looked up a little off the surface along its (viewer-facing) normal, so walls, glass, floors and
+// ceilings, which lie on a room boundary, read the room they face rather than whichever room their cell straddles
+// (3/4 of a plan cell, at least 0.3 m: the pushed point's cell centre then stays on the same side).
+vec3 probeCell(vec3 world, vec3 n)
 {
     if (uProbesOn == 0) return vec3(-1.0, -1.0, 0.0);
-    vec3 c = floor((world - uProbeGridOrigin) / uProbeGridCell);
+    vec3 c = floor((world + n * max(0.3, 0.75 * uProbeGridCell.x) - uProbeGridOrigin) / uProbeGridCell);
     if (any(lessThan(c, vec3(0.0))) || any(greaterThanEqual(c, uProbeGridSize))) return vec3(-1.0, -1.0, 0.0);
     vec4 t = texelFetch(uProbeGrid, ivec3(c), 0);
     return vec3(floor(t.r * 255.0 + 0.5) - 1.0, floor(t.g * 255.0 + 0.5) - 1.0, t.b);
@@ -239,11 +329,11 @@ vec3 probeSample(int i, vec3 world, vec3 dir, float lod, out bool ok, out float 
 // The reflected environment from the probes (blended near room boundaries); have = false where there is none yet;
 // weight (0.4-1) fades reflections of very close hits (see probeSample). Smooth surfaces read at least half a mip
 // level down: a capture is magnified on big glass and mirrors, and the slight softening hides its texels.
-vec3 probeEnvironment(vec3 world, vec3 dir, float rough, out bool have, out float weight)
+vec3 probeEnvironment(vec3 world, vec3 n, vec3 dir, float rough, out bool have, out float weight)
 {
     have = false;
     weight = 1.0;
-    vec3 cell = probeCell(world);
+    vec3 cell = probeCell(world, n);
     if (cell.x < 0.0) return vec3(0.0);
     float lod = max(clamp(rough, 0.0, 1.0) * uProbeMaxLod, 0.5);
     bool okA, okB;
@@ -262,9 +352,9 @@ vec3 probeEnvironment(vec3 world, vec3 dir, float rough, out bool have, out floa
 }
 
 // Debug colours (probe cells): one hue per probe, blended like the reflections; grey where there is none
-vec3 probeDebugColour(vec3 world)
+vec3 probeDebugColour(vec3 world, vec3 n)
 {
-    vec3 cell = probeCell(world);
+    vec3 cell = probeCell(world, n);
     if (cell.x < 0.0) return vec3(0.45);
     vec3 a = 0.5 + 0.45 * cos(6.2832 * (cell.x * 0.618 + vec3(0.0, 0.33, 0.67)));
     if (cell.y < 0.0) return a;
@@ -490,7 +580,7 @@ vec3 shoulder(vec3 c)
 }
 ";
 
-        public const string SCENE_FS = "#version 330 core\n" + SUN_GLSL + AO_GLSL + LIGHTS_GLSL + MATERIALS_GLSL + @"
+        public const string SCENE_FS = "#version 330 core\n" + CLIP_GLSL + SUN_GLSL + AO_GLSL + LIGHTS_GLSL + MATERIALS_GLSL + @"
 in vec3 vWorld;
 in vec3 vNormal;
 in vec4 vColor;
@@ -512,6 +602,7 @@ void main()
     vec2 uvDx = dFdx(vUv);
     vec2 uvDy = dFdy(vUv);
     if (vWorld.z < uClipZ.x || vWorld.z > uClipZ.y) discard;
+    if (sectionCut(vWorld)) discard;
 
     vec4 base = vColor;
     float reflectivity = 0.0;
@@ -523,7 +614,7 @@ void main()
         reflectivity = r.a;
         shine = reflectionInfo(vMaterial);
         if (uReflectDebug == 1) base.rgb = reflectionDebugColour(shine, reflectivity);
-        else if (uReflectDebug == 2) base.rgb = probeDebugColour(vWorld);
+        else if (uReflectDebug == 2) base.rgb = probeDebugColour(vWorld, gl_FrontFacing ? normalize(vNormal) : -normalize(vNormal));
     }
     if (uWhitecard == 1)
     {
@@ -578,7 +669,7 @@ void main()
             fresnel = min((r0 + (1.0 - r0) * grazing) * 0.85, 0.95);
             bool have;
             float weight;
-            vec3 env = probeEnvironment(vWorld, dir, 0.0, have, weight);
+            vec3 env = probeEnvironment(vWorld, n, dir, 0.0, have, weight);
             if (have) fresnel *= weight;
             lit = mix(lit, have ? env : skyColour(dir), fresnel);
         }
@@ -596,7 +687,7 @@ void main()
                 // The probes where baked; else the sky, toned down where AO says the surface is enclosed
                 bool have;
                 float weight;
-                vec3 env = probeEnvironment(vWorld, dir, rough, have, weight);
+                vec3 env = probeEnvironment(vWorld, n, dir, rough, have, weight);
                 if (!have) env = blurredSky(dir, rough) * mix(0.55, 1.0, ao);
                 else fresnel *= weight;
                 // Metals: the reflection takes the metal's colour (kept fairly bright: chrome is near white)
@@ -757,7 +848,7 @@ void main()
         /// view depth (metres along the camera's forward axis); cleared to 0 = nothing there (sky). 1: glow (emissive
         /// colour × uGlow, already hidden behind whatever is in front), the bloom's source; only bound when glow is on.
         /// </summary>
-        private const string GEOMETRY_GLSL = @"#version 330 core
+        private const string GEOMETRY_GLSL = "#version 330 core\n" + CLIP_GLSL + @"
 uniform vec3 uEye;
 uniform vec3 uRight;
 uniform vec3 uUp;
@@ -782,6 +873,7 @@ in vec3 vNormal;
 in vec3 vEmissive;
 void main()
 {
+    if (sectionCut(vWorld)) discard;
     writeGeometry(vWorld, vNormal);
     oGlow = vec4(vEmissive * uGlow, 1.0);
 }";

@@ -75,6 +75,10 @@ namespace BimGo.Game
             }
             if (saved == null || saved.IsEmpty) { return; }
 
+            // The ground plane as it was left (relative to the default, so it survives a re-extraction)
+            if (saved.GroundOffset is float ground) { _groundZ = _groundDefault + ground; }
+            RestoreSection(saved.Section);
+
             foreach (string key in saved.HiddenCategories)
             {
                 if (CategoryCatalog.Find(key) is CategoryDef def && Scene.CategoryLoaded[def.Index]) { _categoryVisible[def.Index] = false; }
@@ -137,7 +141,12 @@ namespace BimGo.Game
         /// </summary>
         private VisibilitySettings ToVisibilitySettings()
         {
-            var settings = new VisibilitySettings();
+            float groundOffset = _groundZ - _groundDefault;
+            var settings = new VisibilitySettings
+            {
+                GroundOffset = MathF.Abs(groundOffset) > 0.001f ? MathF.Round(groundOffset * 1000f) / 1000f : null,
+                Section = _section.IsActive ? _section.Clone() : null
+            };
             foreach (CategoryDef def in CategoryCatalog.All)
             {
                 if (Scene.CategoryLoaded[def.Index] && !_categoryVisible[def.Index]) { settings.HiddenCategories.Add(def.Key); }

@@ -33,6 +33,12 @@ namespace BimGo.Game
         private BookmarkRecord _editBookmark;
         private bool _editBookmarkIsNew;
 
+        // Comment issue text boxes (opened from the comment panel): a reply, or the assignee
+        private CommentRecord _editReplyFor, _editAssigneeFor;
+
+        /// <summary>Longest assignee name.</summary>
+        private const int MAX_ASSIGNEE = 60;
+
         private static readonly string[] COLOUR_OPTIONS = { "Whitecard", "Material", "Realistic" };
         private static readonly string[] MSAA_OPTIONS = { "Off", "2x", "4x" };
 
@@ -73,8 +79,10 @@ namespace BimGo.Game
         public void BeginCommentEdit(Vector3 point, long elementId, string level)
         {
             _editing = true;
+            _editSunStudy = false;
             _editRecord = null;
             _editBookmark = null;
+            _editReplyFor = _editAssigneeFor = null;
             _editMax = _editChars.Length;
             _editPoint = point;
             _editElement = elementId;
@@ -90,8 +98,10 @@ namespace BimGo.Game
         {
             if (record == null) { return; }
             _editing = true;
+            _editSunStudy = false;
             _editRecord = record;
             _editBookmark = null;
+            _editReplyFor = _editAssigneeFor = null;
             _editMax = _editChars.Length;
             _editPoint = record.Local;
             _editElement = record.ElementId;
@@ -111,13 +121,52 @@ namespace BimGo.Game
         {
             if (record == null) { return; }
             _editing = true;
+            _editSunStudy = false;
             _editRecord = null;
             _editBookmark = record;
+            _editReplyFor = _editAssigneeFor = null;
             _editBookmarkIsNew = isNew;
             _editMax = BookmarkStore.MAX_NAME;
             _editLevel = string.IsNullOrEmpty(record.Level) ? null : record.Level;
             _editLength = Math.Min(record.Name?.Length ?? 0, _editMax);
             record.Name?.CopyTo(0, _editChars, 0, _editLength);
+            _window.Input.ReleaseAll();
+        }
+
+        /// <summary>
+        /// Opens the text box for a reply to a comment (from the comment panel; the menu stays open behind it).
+        /// </summary>
+        private void BeginCommentReply(CommentRecord record)
+        {
+            if (record == null) { return; }
+            _editing = true;
+            _editSunStudy = false;
+            _editRecord = null;
+            _editBookmark = null;
+            _editAssigneeFor = null;
+            _editReplyFor = record;
+            _editMax = _editChars.Length;
+            _editLevel = string.IsNullOrEmpty(record.Level) ? null : record.Level;
+            _editLength = 0;
+            _window.Input.ReleaseAll();
+        }
+
+        /// <summary>
+        /// Opens the text box on a comment's assignee (ready to change; empty + Enter clears it).
+        /// </summary>
+        private void BeginCommentAssign(CommentRecord record)
+        {
+            if (record == null) { return; }
+            _editing = true;
+            _editSunStudy = false;
+            _editRecord = null;
+            _editBookmark = null;
+            _editReplyFor = null;
+            _editAssigneeFor = record;
+            _editMax = MAX_ASSIGNEE;
+            _editLevel = string.IsNullOrEmpty(record.Level) ? null : record.Level;
+            _editLength = Math.Min(record.AssignedTo?.Length ?? 0, _editMax);
+            record.AssignedTo?.CopyTo(0, _editChars, 0, _editLength);
             _window.Input.ReleaseAll();
         }
 
@@ -145,12 +194,22 @@ namespace BimGo.Game
                             if (_editBookmarkIsNew && _thumbnailFor == _editBookmark) { _thumbnailFor = null; }
                             Toast(_editBookmarkIsNew ? "Bookmark cancelled (nothing was saved)" : "Name not changed");
                         }
+                        else if (_editSunStudy)
+                        {
+                            Toast("Study not saved");
+                        }
+                        else if (_editReplyFor != null || _editAssigneeFor != null)
+                        {
+                            Toast(_editReplyFor != null ? "Reply cancelled" : "Assignee not changed");
+                        }
                         else
                         {
                             Toast(_editRecord != null ? "Edit cancelled" : "Comment cancelled");
                         }
                         _editRecord = null;
                         _editBookmark = null;
+                        _editReplyFor = _editAssigneeFor = null;
+                        _editSunStudy = false;
                         return;
 
                     default:
@@ -166,8 +225,34 @@ namespace BimGo.Game
             string text = new string(_editChars, 0, _editLength).Trim();
             CommentRecord editing = _editRecord;
             BookmarkRecord bookmark = _editBookmark;
+            CommentRecord replyTo = _editReplyFor, assignFor = _editAssigneeFor;
+            bool sunStudy = _editSunStudy;
             _editRecord = null;
             _editBookmark = null;
+            _editReplyFor = _editAssigneeFor = null;
+            _editSunStudy = false;
+
+            if (sunStudy)
+            {
+                SaveSunStudy(text);
+                return;
+            }
+
+            if (replyTo != null)
+            {
+                if (text.Length == 0) { Toast("Empty reply not saved"); return; }
+                Comments.AddReply(replyTo, text);
+                Sound.Play(SoundId.CommentPlace);
+                _commentsNotice = Comments.LastError ?? $"Reply added ({replyTo.ReplyCount} in the thread)";
+                return;
+            }
+            if (assignFor != null)
+            {
+                Comments.SetIssue(assignFor, assignedTo: text);
+                Sound.Play(SoundId.UiClick);
+                _commentsNotice = Comments.LastError ?? (text.Length == 0 ? "Unassigned" : $"Assigned to {text}");
+                return;
+            }
 
             if (bookmark != null)
             {
@@ -199,7 +284,12 @@ namespace BimGo.Game
                 return;
             }
 
-            Comments.Add(_editPoint, text, _editElement, _editLevel);
+            // The new comment remembers where it was made from, and a picture of that view (taken next frame: the
+            // capture reads the 3D view before the UI is drawn, so the text box isn't in it)
+            string uniqueId = _editElement > 0 && _elementIndexById.TryGetValue(_editElement, out int elementIndex) ? Scene.Elements[elementIndex].UniqueId : null;
+            CommentRecord added = Comments.Add(_editPoint, text, _editElement, _editLevel, uniqueId);
+            Comments.SetView(added, _player.Feet, _player.Yaw, _player.Pitch, _player.Flying, section: _section);
+            _commentThumbnailFor = added;
             Sound.Play(SoundId.CommentPlace);
             Toast(Comments.LastError ?? $"Comment saved to {Comments.FileName}", important: Comments.LastError != null);
         }
@@ -216,10 +306,14 @@ namespace BimGo.Game
             float x = _window.Width * 0.5f - w * 0.5f, y = _window.Height * 0.5f + S(48);
 
             bool naming = _editBookmark != null;
-            uint frame = naming ? UiTheme.BOOKMARK : UiTheme.COMMENT;
-            uint label = naming ? UiTheme.BOOKMARK_LABEL : UiTheme.COMMENT_LABEL;
+            uint frame = _editSunStudy ? UiTheme.SUN : naming ? UiTheme.BOOKMARK : UiTheme.COMMENT;
+            uint label = _editSunStudy ? UiTheme.SUN_LABEL : naming ? UiTheme.BOOKMARK_LABEL : UiTheme.COMMENT_LABEL;
             _ui.Panel(x, y, w, h, UiTheme.PANEL_STRONG, frame);
-            Text.Clear().Append(naming ? "BOOKMARK NAME · " : _editRecord != null ? "EDIT COMMENT · " : "NEW COMMENT · ").Append(_editLevel ?? "—");
+            Text.Clear().Append(_editSunStudy ? "SUN STUDY NAME (same name replaces) · "
+                : naming ? "BOOKMARK NAME · "
+                : _editReplyFor != null ? "REPLY · "
+                : _editAssigneeFor != null ? "ASSIGN TO (empty = unassigned) · "
+                : _editRecord != null ? "EDIT COMMENT · " : "NEW COMMENT · ").Append(_editLevel ?? "—");
             _ui.Text(f.Small, x + S(14), y + S(12), Text.Span, label, S(1f));
 
             float boxY = y + S(32);
@@ -280,6 +374,16 @@ namespace BimGo.Game
                 BuildTexturesPanel();
                 return;
             }
+            if (IsLibraryPanelOpen)
+            {
+                BuildLibraryPanel();
+                return;
+            }
+            if (IsRoomsPanelOpen)
+            {
+                BuildRoomsPanel();
+                return;
+            }
 
             FontAtlas f = _ui.Atlas;
             InputState input = _window.Input;
@@ -304,7 +408,9 @@ namespace BimGo.Game
             float endY = height - pad - S(48);
             int hiddenThings = HiddenThingsCount();
             bool texturesButton = HasTexturePanel;
-            int buttons = (IsFileMode ? 9 : 7) + (hiddenThings > 0 ? 1 : 0) + (texturesButton ? 1 : 0);
+            bool libraryButton = HasLibrary;
+            bool roomsButton = Scene.Rooms.Length > 0;
+            int buttons = (IsFileMode ? 10 : 8) + (hiddenThings > 0 ? 1 : 0) + (texturesButton ? 1 : 0) + (libraryButton ? 1 : 0) + (roomsButton ? 1 : 0);
             float step = Math.Clamp((endY - S(12) - y) / buttons, S(40), S(54));
             float buttonH = step - S(6);
             if (MenuButton(f, leftX, y, leftW, "RESUME", primary: true, danger: false, height: buttonH)) { SetPaused(false); return; }
@@ -339,6 +445,18 @@ namespace BimGo.Game
             if (texturesButton)
             {
                 if (MenuButton(f, leftX, y, leftW, TexturesMenuLabel(), false, false, height: buttonH)) { OpenTextures(); return; }
+                y += step;
+            }
+            if (roomsButton)
+            {
+                if (MenuButton(f, leftX, y, leftW, "FIND ROOM", false, false, height: buttonH)) { OpenRooms(); return; }
+                y += step;
+            }
+            if (MenuButton(f, leftX, y, leftW, "SUN HOURS STUDY", false, false, height: buttonH)) { OpenSunHours(); return; }
+            y += step;
+            if (libraryButton)
+            {
+                if (MenuButton(f, leftX, y, leftW, LibraryMenuLabel(), false, false, height: buttonH)) { OpenLibrary(); return; }
                 y += step;
             }
 
@@ -569,7 +687,14 @@ namespace BimGo.Game
             // Ground plane (relative to the default, shown absolute)
             Text.Clear().Append(_groundZ, 3).Append(" m");
             float ground = Slider(f, input, 0, ix, y, iw, "Ground plane", Text.Span, _groundZ, _groundDefault - 10f, _groundDefault + 10f);
-            _groundZ = MathF.Round(ground / 0.05f) * 0.05f;
+            // Only while dragging (the default needn't sit on the 5 cm steps, and must not mark the file changed)
+            ground = MathF.Round(ground / 0.05f) * 0.05f;
+            if (_activeSlider == 0 && ground != _groundZ)
+            {
+                // Saved with the model (visibility.json / the live model folder), like hidden elements
+                _groundZ = ground;
+                VisibilityChanged();
+            }
             y += S(58);
 
             // Colour mode

@@ -30,18 +30,23 @@ namespace BimGo.Game
             ("V", "Fly / walk (no-clip)"),
             ("PGUP / PGDN", "Level up / down"),
             ("H · SHIFT+H", "Go home · Set home here"),
-            ("1–8 · WHEEL", "Select gun"),
+            ("1–9 · WHEEL", "Select gun (9 Place: family library)"),
+            ("F", "Gizmo / Clone / Place: drop onto the surface below"),
             ("I · SHIFT+I", "Scan gun: hide target · isolate its category"),
             ("X", "Clear this gun's markers"),
             ("B · CTRL+1–9", "Bookmark this view · Go to bookmark"),
             ("L", "Coordinate readout"),
             ("K", "Artificial lights: off / glow / light"),
             ("O · SHIFT+O", "Shadows on/off · Sun panel"),
+            ("J", "Sun / daylight study (click surfaces, RMB-drag looks)"),
+            ("P · SHIFT+P · CTRL+P", "Section box · cut at aimed surface · clear"),
             ("[ ]", "Sun time −/+ 5 min (Shift: 1 min)"),
             ("CTRL+S · Z · Y", "Save · Undo · Redo (files)"),
+            ("CTRL+F", "Find a room and go there"),
             ("F5", "Refresh from Revit (live sessions)"),
             ("TAB · ESC", "Minimap · Pause menu"),
             ("U", "Hide the UI (Esc or U shows it)"),
+            ("M", "Photo mode: hi-res stills and 360° panoramas"),
             ("F11 · F12", "Fullscreen · Screenshot"),
             ("F1", "Hide help · BimGo " + Program.Version)
         };
@@ -55,6 +60,63 @@ namespace BimGo.Game
         {
             int width = _window.Width, height = _window.Height;
 
+            // ---- Photo mode: a pending shot renders off-screen first (camera and targets restored afterwards)
+            if (_photoShotIn > 0 && --_photoShotIn == 0) { TakePhoto(); }
+
+            RenderScene(width, height, _target, _msaa, photo: false);
+
+            _target.BlitToWindow();
+            if (ThumbnailDue) { CaptureThumbnail(width, height); }
+            if (_screenshotRequested) { CaptureScreenshot(width, height); }
+            if (_sunShotRequested)
+            {
+                // The study's screenshot: the 3D view plus the legend (drawn and flushed first), no other UI
+                _sunShotRequested = false;
+                Gl.Viewport(0, 0, width, height);
+                BuildSunLegend(_ui.Atlas, S(20), height - S(20) - S(78));
+                _ui.Flush(width, height);
+                CaptureScreenshot(width, height, " sun hours");
+            }
+
+            // ---- Window pass: minimap 3D, then all 2D UI in one batch
+            Gl.Viewport(0, 0, width, height);
+            float mapX = width - S(20) - S(220), mapY = S(20);
+            if (_showMap && !_paused && !_uiHidden && !_photoOpen) { DrawMinimapPlan(mapX + S(8), mapY + S(30), S(204), S(170)); }
+
+            if (_paused)
+            {
+                // A text box opened from a panel (reply, assignee) sits over the menu and takes the clicks
+                if (IsEditingComment) { _window.Input.ConsumeClicks(); }
+                BuildPauseMenu();
+                if (IsEditingComment) { BuildCommentEditor(); }
+            }
+            else if (_photoOpen)
+            {
+                // Photo mode: a clean frame, the grid and the photo panel only
+                BuildPhotoOverlay(_ui.Atlas, _window.Input, width, height);
+            }
+            else
+            {
+                // A text box (comment, bookmark or study name) takes the clicks too: panels behind it stay still
+                if (IsEditingComment) { _window.Input.ConsumeClicks(); }
+                if (_uiHidden) { BuildHiddenHud(width); }
+                else { BuildHud(mapX, mapY); }
+                if (IsEditingComment) { BuildCommentEditor(); }
+            }
+            _ui.Flush(width, height);
+        }
+
+        /// <summary>
+        /// The 3D passes into a target: shadows, lights, AO and glow, the scene, caps, ground, highlights, glass, bloom,
+        /// photo exposure, then (not for photos) markers and the section gizmo. Uses <see cref="Camera"/> as it stands.
+        /// </summary>
+        /// <param name="width">Target width (pixels).</param>
+        /// <param name="height">Target height.</param>
+        /// <param name="target">The target (sized here).</param>
+        /// <param name="samples">MSAA samples.</param>
+        /// <param name="photo">A photo: no probe baking, no highlights, markers or gizmos.</param>
+        private void RenderScene(int width, int height, RenderTarget target, int samples, bool photo)
+        {
             // ---- Sun lighting and shadow maps (only changed cascades re-render)
             _renderer.Lighting = CurrentLighting();
             string shadowError = _renderer.UpdateShadows(Camera, Scene.Bounds, ShadowSceneKey(), _groupVisible, Dynamics, _whitecard,
@@ -76,11 +138,11 @@ namespace BimGo.Game
             if (effectsError != null) { OnScreenEffectsFailure(effectsError); }
 
             // ---- Reflection probes: a couple of faces per frame until baked, re-baked a moment after things change
-            UpdateReflectionProbes();
+            if (!photo) { UpdateReflectionProbes(); }
 
             // ---- 3D scene into the (optionally multisampled) target
-            _target.Ensure(width, height, _msaa);
-            _target.Bind();
+            target.Ensure(width, height, samples);
+            target.Bind();
             Vector3 fog = _renderer.FogColour;
             Gl.ClearColor(fog.X, fog.Y, fog.Z, 1f);
             Gl.Clear(Gl.COLOR_BUFFER_BIT | Gl.DEPTH_BUFFER_BIT);
@@ -108,18 +170,25 @@ namespace BimGo.Game
                 Plan = false,
                 ClipZ = new Vector2(-1e7f, 1e7f),
                 FogDensity = 0.0022f,
-                Sun = true
+                Sun = true,
+                Section = true
             };
 
             _renderer.DrawStatic(p, _groupVisible, transparent: false);
             _renderer.DrawDynamic(p, Dynamics, transparent: false);
+            if (_sectionCount > 0)
+            {
+                // Fill the cut solids (stencil caps) before the ground
+                float extent = Scene.Bounds.Size.Length() + 50f;
+                _renderer.DrawSectionCaps(Camera.ViewProjection, Camera.Planes, Camera.Position, _groupVisible, Dynamics, _capColour, extent);
+            }
             _renderer.DrawGround(Camera, _groundZ);
 
             // Gun highlights (scan target, primed demolitions, gizmo target…)
             Gun active = _guns[_activeGun];
             _highlights.Clear();
             // Hidden UI: no tints either, unless a gun is in the middle of something (Gizmo / Clone holding an element)
-            if (!_paused && (!_uiHidden || active.CapturesInput)) { active.CollectHighlights(_highlights); }
+            if (!photo && !_photoOpen && !_paused && (!_uiHidden || active.CapturesInput)) { active.CollectHighlights(_highlights); }
             if (_highlights.Count > 0)
             {
                 Gl.Enable(Gl.BLEND);
@@ -143,9 +212,12 @@ namespace BimGo.Game
             // Bloom from glowing surfaces over everything (glass included)
             _renderer.CompositeGlow();
 
+            // Photo exposure (the preview and the photo alike)
+            if (_photoOpen) { _renderer.ApplyExposure(_photoExposure); }
+
             // Markers: depth-tested, then a faint x-ray copy so markers behind walls stay discoverable (none while the
-            // UI is hidden: clean views)
-            if (!_uiHidden)
+            // UI is hidden or in photo mode: clean views)
+            if (!_uiHidden && !photo && !_photoOpen)
             {
                 _overlay.Begin(Camera);
                 for (int i = 0; i < _guns.Length; i++) { _guns[i].DrawWorld(_overlay, i == _activeGun); }
@@ -153,26 +225,11 @@ namespace BimGo.Game
                 _overlay.Draw(Camera, depthTest: false, alpha: 0.16f, additive: false);
             }
 
-            _target.BlitToWindow();
-            if (_thumbnailFor != null) { CaptureThumbnail(width, height); }
-            if (_screenshotRequested) { CaptureScreenshot(width, height); }
+            // Sun hours grid (study results are content, so they show with the UI hidden too)
+            DrawSunHoursCells();
 
-            // ---- Window pass: minimap 3D, then all 2D UI in one batch
-            Gl.Viewport(0, 0, width, height);
-            float mapX = width - S(20) - S(220), mapY = S(20);
-            if (_showMap && !_paused && !_uiHidden) { DrawMinimapPlan(mapX + S(8), mapY + S(30), S(204), S(170)); }
-
-            if (_paused)
-            {
-                BuildPauseMenu();
-            }
-            else
-            {
-                if (_uiHidden) { BuildHiddenHud(width); }
-                else { BuildHud(mapX, mapY); }
-                if (IsEditingComment) { BuildCommentEditor(); }
-            }
-            _ui.Flush(width, height);
+            // Section box frame and handles (editor only)
+            if (!photo) { DrawSectionGizmo(); }
         }
 
         /// <summary>
@@ -355,7 +412,7 @@ namespace BimGo.Game
             _ui.Rect(cx + gap, cy - t1 * 0.5f, arm, t1, UiTheme.TEXT);
             _ui.Circle(cx, cy, S(1.8f), active.Colour, 10);
 
-            if (!_window.IsCaptured && !IsEditingComment && !_sunPanelOpen)
+            if (!_window.IsCaptured && !IsEditingComment && !_sunPanelOpen && !_sunHoursOpen)
             {
                 const string hint = "Click to look around";
                 float hintWidth = UiBatch.Measure(f.Body, hint) + S(24);
@@ -369,7 +426,7 @@ namespace BimGo.Game
             // Minimap and the gun's context panel beneath it
             if (_showMap) { DrawMinimapOverlay(mapX, mapY); }
             // (hidden while the sun panel is open: the two would overlap on smaller screens)
-            if (!_sunPanelOpen)
+            if (!_sunPanelOpen && !_sunHoursOpen && !_sectionOpen)
             {
                 float panelTop = _showMap ? mapY + S(208) + S(12) : S(20);
                 float panelWidth = S(260), panelX = width - S(20) - panelWidth;
@@ -380,6 +437,9 @@ namespace BimGo.Game
 
             BuildSunIcon(f, _window.Input);
             if (_sunPanelOpen) { BuildSunPanel(f, _window.Input); }
+            if (_sunHoursOpen) { BuildSunHoursPanel(f, _window.Input); }
+            BuildSectionPanel(f, _window.Input);
+            BuildSunLegend(f, S(20), height - S(52) - S(78));
 
             BuildHelp(f, height);
             BuildGunBar(f, width, height, active);

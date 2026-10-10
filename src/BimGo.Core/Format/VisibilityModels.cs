@@ -4,8 +4,8 @@ using System.Text.Json.Serialization;
 namespace BimGo.Format
 {
     /// <summary>
-    /// What the walkthrough hides without editing the model: category and link toggles, and elements hidden with the
-    /// Scan gun (I). Saved as <c>visibility.json</c> in a .bimgo, or a sidecar beside the Revit model in live sessions.
+    /// What the walkthrough hides without editing the model: category and link toggles, elements hidden with the
+    /// Scan gun (I), and the ground plane's height (pause menu). Saved as <c>visibility.json</c> in a .bimgo, or a sidecar beside the Revit model in live sessions.
     /// Everything is matched by stable keys (category keys, link instance UniqueIds, element UniqueIds), so it survives
     /// re-extraction.
     /// </summary>
@@ -20,9 +20,22 @@ namespace BimGo.Format
         /// <summary>Elements hidden one by one.</summary>
         public List<HiddenElement> HiddenElements { get; set; } = new();
 
-        /// <summary>True when nothing is hidden (the file then leaves the entry out).</summary>
+        /// <summary>
+        /// The ground plane moved in the pause menu: metres above (+) or below (−) its default (100 mm under the
+        /// lowest level), so it stays right after a re-extraction. Null = the default. Older readers ignore it.
+        /// </summary>
+        public float? GroundOffset { get; set; }
+
+        /// <summary>The section cut (section box round), or null when nothing is cut. Older readers ignore it.</summary>
+        public Scene.SectionCut Section { get; set; }
+
+        /// <summary>Most the ground plane can move from its default (m), as the pause menu slider.</summary>
+        public const float MAX_GROUND_OFFSET = 10f;
+
+        /// <summary>True when nothing is hidden and the ground is at its default (the file then leaves the entry out).</summary>
         [JsonIgnore]
-        public bool IsEmpty => (HiddenCategories?.Count ?? 0) == 0 && (HiddenLinks?.Count ?? 0) == 0 && (HiddenElements?.Count ?? 0) == 0;
+        public bool IsEmpty => (HiddenCategories?.Count ?? 0) == 0 && (HiddenLinks?.Count ?? 0) == 0 && (HiddenElements?.Count ?? 0) == 0
+            && GroundOffset == null && Section == null;
 
         /// <summary>
         /// Drops null and blank entries (guards against hand-edited files).
@@ -33,6 +46,11 @@ namespace BimGo.Format
             HiddenCategories = (HiddenCategories ?? new List<string>()).Where(k => !string.IsNullOrWhiteSpace(k)).Distinct(StringComparer.Ordinal).ToList();
             HiddenLinks = (HiddenLinks ?? new List<string>()).Where(k => !string.IsNullOrWhiteSpace(k)).Distinct(StringComparer.Ordinal).ToList();
             HiddenElements = (HiddenElements ?? new List<HiddenElement>()).Where(e => e != null && (!string.IsNullOrEmpty(e.UniqueId) || e.Id > 0)).ToList();
+            if (GroundOffset is float ground)
+            {
+                GroundOffset = float.IsFinite(ground) && MathF.Abs(ground) > 1e-4f ? Math.Clamp(ground, -MAX_GROUND_OFFSET, MAX_GROUND_OFFSET) : null;
+            }
+            Section = Section?.IsActive == true ? Section.Clean() : null;
             return this;
         }
     }

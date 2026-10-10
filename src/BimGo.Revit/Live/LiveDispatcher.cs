@@ -257,7 +257,7 @@ namespace BimGo.Live
                 var progress = new Utilities.OperationProgress();
                 using (Forms.ProgressWindow.Show($"Refreshing {doc.Title}", progress, _revitWindow))
                 {
-                    SceneData scene = SceneExtractor.Extract(new UIDocument(doc), LaunchSettings.LoadOrDefault(), progress);
+                    SceneData scene = SceneExtractor.Extract(new UIDocument(doc), LaunchSettings.LoadOrDefault(), progress, liveSession: true);
                     progress.Begin("Writing the snapshot", 0.85, 1.0);
                     return Announce(host, scene, reason, replyTo, progress);
                 }

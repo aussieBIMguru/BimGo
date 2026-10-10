@@ -72,6 +72,31 @@ Stage the detailed questions for each round with AskUserQuestion (recommendation
 **Considered and left out (Gavin, 2026-10-10):** phase before / after view, element search, headroom check.
 **Minimap stays as is.**
 
+## 2a. Licensing review (2026-10-10): to do in the polish / installer rounds
+
+Audit result: nothing GPL / copyleft, no copied third-party code, no shipped proprietary files. Shipped third-party
+parts are Silk.NET + transitive .NET packages (MIT) and ambientCG textures (CC0), all already in
+`THIRD-PARTY-NOTICES.txt`. Revit API dlls are referenced with `Private=false` (never shipped). UI fonts (Bahnschrift,
+Segoe UI, Consolas) are the user's installed Windows fonts, rasterised at run time (no font files shipped). Published
+methods are implemented from their formulas (formulas aren't copyrightable): NOAA solar position (US public
+domain), CIE overcast / clear sky, IES clear-sky illuminance, BRE split-flux, McGuire et al. SAO-style AO (own GLSL),
+Möller–Trumbore, Hammersley points, Schlick Fresnel, PCF; open formats: BCF 2.1 (buildingSMART), IFC GUID, Google
+Photo Sphere XMP.
+
+Add:
+1. **Trademark notice** (README, About / help, installer, `.bundle` description): "Autodesk and Revit are registered
+   trademarks of Autodesk, Inc. BCF is a buildingSMART International standard. BimGo is an independent project, not
+   affiliated with or endorsed by Autodesk or buildingSMART." Name the add-in as "BimGo for Revit" (descriptive use),
+   never Autodesk logos or "Autodesk BimGo".
+2. **Acknowledgements section** in `THIRD-PARTY-NOTICES.txt` (courtesy, not required): the methods and formats above
+   with references.
+3. **Recheck the publish folder** against the notices at installer time (transitive System.* / Microsoft.* packages,
+   the self-contained .NET runtime: MIT, plus its own THIRD-PARTY-NOTICES which the runtime ships; include it).
+4. **Keep the study disclaimer** ("early design indicator, not a compliance simulation") in the UI and CSV.
+5. **Round A / B new parts stay in-box:** Media Foundation H.264 encoder and XInput are Windows components (Microsoft
+   covers the codec licence for in-box use); no codec or library is bundled. If a bundled encoder (e.g. FFmpeg,
+   x264 = GPL) is ever proposed, stop and ask Gavin.
+
 ## 3. Current key map (from code + README §3)
 
 **Global**

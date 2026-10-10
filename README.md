@@ -1,4 +1,6 @@
 # BimGo — First-Person BIM Walkthroughs
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FaussieBIMguru%2FBimGo.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2FaussieBIMguru%2FBimGo?ref=badge_shield)
+
 
 BimGo (formerly **RvtGo**) turns a Revit model into an FPS-style, first-person walkthrough: collision, gravity, walkable stairs, a room readout and nine tool guns (**Scan**, **Measure**, **Portal**, **Comment**, **Teleport**, **Demolish**, **Gizmo**, **Clone**, **Place**). It renders with its own small OpenGL engine (own renderer, window and input; GL function bindings from Silk.NET). Personal project of Gavin, publisher **Aussie BIM Guru**, MIT licence.
 
@@ -27,6 +29,9 @@ Edits respect two phases picked in Options: the walkthrough shows the **new** ph
 10. **GLSL check without a GPU:** pull the shader strings out of `Rendering/Shaders.cs`, swap `#version 330 core` for `#version 300 es` + precision lines, compile and link in headless WebGL2 (Playwright + the pre-installed Chromium, SwiftShader); give every sampler its own texture unit in a test.
 11. **Revit template conventions:** commands in `Commands/Cmds_<Group>.cs` as `Cmd_<Button>`; extensions in `Extensions/TypeName_Ext.cs`; tooltips and icons resolve from the command's base name (`BimGo_Launch`, `BimGo_Export`).
 12. **Name clashes:** WPF, WinForms and Revit `DB` / `UI` are global usings in BimGo.Revit; WinForms + System.Drawing are global in BimGo.App. Avoid unqualified `Color`, `Point`, `Plane`, `View`, `Panel`, `CheckBox`, `TextBox`, `TaskDialog` (use the `DB.`, `UI.`, `SD.`, `Wpf.`, `Win.`, `WinForms` aliases).
+
+
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FaussieBIMguru%2FBimGo.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2FaussieBIMguru%2FBimGo?ref=badge_large)
 
 ## 1. Overview
 

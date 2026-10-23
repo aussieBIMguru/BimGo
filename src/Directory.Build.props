@@ -6,7 +6,7 @@
 		publish script and the installer all read it.
 	-->
 	<PropertyGroup>
-		<BimGoVersion>1.0.0</BimGoVersion>
+		<BimGoVersion>1.0.1</BimGoVersion>
 		<Version>$(BimGoVersion)</Version>
 		<AssemblyVersion>$(BimGoVersion).0</AssemblyVersion>
 		<FileVersion>$(BimGoVersion).0</FileVersion>

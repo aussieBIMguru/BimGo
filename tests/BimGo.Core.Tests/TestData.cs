@@ -250,7 +250,7 @@ namespace BimGo.Tests
         }
 
         /// <summary>The writer recorded in test files.</summary>
-        public static WriterInfo Writer => new("BimGo.Tests", "1.0.0");
+        public static WriterInfo Writer => new("BimGo.Tests", "0.0.0-test");
 
         /// <summary>
         /// Writes a .bimgo by hand: the given JSON entries plus a geometry.bin made from the vertex and index arrays.

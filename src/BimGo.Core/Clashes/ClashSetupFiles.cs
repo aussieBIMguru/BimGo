@@ -53,7 +53,7 @@ namespace BimGo.Clashes
         /// <summary>The model it came from (for the import summary), or null.</summary>
         public string ModelTitle { get; set; }
 
-        /// <summary>Who wrote it ("BimGo 1.0.0"), or null.</summary>
+        /// <summary>Who wrote it ("BimGo X.X.X"), or null.</summary>
         public string Generator { get; set; }
 
         /// <summary>When (UTC), or null.</summary>

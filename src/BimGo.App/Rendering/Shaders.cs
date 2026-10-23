@@ -1239,31 +1239,31 @@ float segmentDistance(vec2 p, vec2 a, vec2 b)
     float t = clamp(dot(p - a, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
     return length(p - a - ab * t);
 }
-vec2 boltPoint(int i, float top, float step, float seed)
+vec2 boltPoint(int i, float top, float segStep, float seed)
 {
     if (i <= 0) return vec2(0.0, top);
     float x = (boltHash(seed * 91.0 + float(i)) - 0.5) * 0.22 + (boltHash(seed * 37.0 + float(i) * 0.5) - 0.5) * 0.08 * float(i);
-    return vec2(x, top - float(i) * step);
+    return vec2(x, top - float(i) * segStep);
 }
 float boltDistance(vec2 q, float seed, float bottom)
 {
     const int SEGMENTS = 12;
     float top = 0.45;
-    float step = (top - bottom) / float(SEGMENTS);
-    int i = int(clamp(floor((top - q.y) / step), 0.0, float(SEGMENTS - 1)));
+    float segStep = (top - bottom) / float(SEGMENTS);
+    int i = int(clamp(floor((top - q.y) / segStep), 0.0, float(SEGMENTS - 1)));
     float d = 1e3;
     for (int k = -1; k <= 1; k++)
     {
         int j = clamp(i + k, 0, SEGMENTS - 1);
-        d = min(d, segmentDistance(q, boltPoint(j, top, step, seed), boltPoint(j + 1, top, step, seed)));
+        d = min(d, segmentDistance(q, boltPoint(j, top, segStep, seed), boltPoint(j + 1, top, segStep, seed)));
     }
     // One fork from a third of the way down, leaning out to one side, five shorter segments
     int forkAt = 3 + int(boltHash(seed * 13.0) * 3.0);
-    vec2 a = boltPoint(forkAt, top, step, seed);
+    vec2 a = boltPoint(forkAt, top, segStep, seed);
     float side = boltHash(seed * 5.0) < 0.5 ? -1.0 : 1.0;
     for (int f = 0; f < 5; f++)
     {
-        vec2 b = a + vec2(side * (0.05 + 0.06 * boltHash(seed * 17.0 + float(f))), -step * (0.8 + 0.4 * boltHash(seed * 23.0 + float(f))));
+        vec2 b = a + vec2(side * (0.05 + 0.06 * boltHash(seed * 17.0 + float(f))), -segStep * (0.8 + 0.4 * boltHash(seed * 23.0 + float(f))));
         d = min(d, segmentDistance(q, a, b) + 0.004 * float(f)); // thinner towards its tip
         a = b;
     }
@@ -1317,7 +1317,7 @@ vec3 hash33(vec3 p)
     p += dot(p, p.yxz + 33.33);
     return fract((p.xxy + p.yxx) * p.zyx);
 }
-float noise3(vec3 p)
+float skyNoise3(vec3 p)
 {
     vec3 i = floor(p), f = fract(p);
     vec3 u = f * f * (3.0 - 2.0 * f);
@@ -1363,8 +1363,8 @@ vec3 nightSky(vec3 dir, float px)
     float g = dot(c, GALACTIC_POLE);
     float band = exp(-g * g / 0.014);
     float core = 0.55 + 0.9 * pow(max(dot(c, GALACTIC_CENTRE), 0.0), 3.0);
-    float lane = 1.0 - 0.55 * smoothstep(0.45, 0.7, noise3(c * 18.0)) * exp(-g * g / 0.0025);
-    float milky = band * core * lane * (0.5 + 0.5 * noise3(c * 7.0)) * uStars.w * (1.0 - 0.8 * wash);
+    float lane = 1.0 - 0.55 * smoothstep(0.45, 0.7, skyNoise3(c * 18.0)) * exp(-g * g / 0.0025);
+    float milky = band * core * lane * (0.5 + 0.5 * skyNoise3(c * 7.0)) * uStars.w * (1.0 - 0.8 * wash);
     return (stars * uStars.y * (1.0 - 0.5 * wash) + vec3(0.50, 0.56, 0.72) * 0.11 * milky) * extinction * uNight;
 }
 
@@ -1402,7 +1402,7 @@ void main()
                 float inside = (1.0 - smoothstep(1.0 - edge, 1.0 + edge, sqrt(q2))) * step(0.0, m);
                 vec3 n = q - uMoonDir * sqrt(max(1.0 - q2, 0.0));
                 float lit = smoothstep(-0.06, 0.10, dot(n, uMoonSun));
-                float maria = 0.86 + 0.14 * noise3(n * 5.0 + 3.0) - 0.16 * smoothstep(0.5, 0.75, noise3(n * 2.2 + 9.0));
+                float maria = 0.86 + 0.14 * skyNoise3(n * 5.0 + 3.0) - 0.16 * smoothstep(0.5, 0.75, skyNoise3(n * 2.2 + 9.0));
                 vec3 moon = uMoonDisc * (lit * maria + 0.03);
                 c = c * (1.0 - inside * uNight * 0.75) + moon * inside;
             }

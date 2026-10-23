@@ -15,7 +15,7 @@ namespace BimGo.Utilities
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "BimGo", "BimGo.exe");
 
         /// <summary>
-        /// Round Z-E: an exe's file version ("1.0.0.0"), or empty when it can't be read.
+        /// Round Z-E: an exe's file version ("X.0.0.0"), or empty when it can't be read.
         /// </summary>
         public static string ExeVersion(string exe)
         {

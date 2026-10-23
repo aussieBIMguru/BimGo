@@ -31,7 +31,7 @@ How BimGo is built: conventions, the code layout, how each part works, the `.bim
 
 | Item | Decision |
 |---|---|
-| Solution | `src/BimGo.sln`: **BimGo.Core** (net8.0), **BimGo.App** (net8.0-windows, `BimGo.exe`), **BimGo.Revit** (Revit 2025 / 2026 on net8.0-windows, 2027 on net10.0-windows). Version **1.0.0** on all three; publisher Aussie BIM Guru |
+| Solution | `src/BimGo.sln`: **BimGo.Core** (net8.0), **BimGo.App** (net8.0-windows, `BimGo.exe`), **BimGo.Revit** (Revit 2025 / 2026 on net8.0-windows, 2027 on net10.0-windows). Version **1.0.1** on all three; publisher Aussie BIM Guru |
 | Renderer | OpenGL 4.1 core (falls back to 3.3), GLSL 330, Win32 window |
 | File format | `.bimgo`: ZIP of JSON metadata, binary geometry and optional parts ([below](#the-bimgo-format-version-1)) |
 | Live link | One watched folder per document (`%LocalAppData%\BimGo\Sessions\<id>\`): JSON message files both ways, heartbeats, `.bimgo` snapshots for geometry; one `ExternalEvent` runs all Revit-side work ([below](#the-live-session-protocol-version-1)) |

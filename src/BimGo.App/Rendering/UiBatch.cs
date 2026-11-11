@@ -80,6 +80,7 @@ namespace BimGo.Rendering
             Atlas.Build(scale);
             _wu = Atlas.WhiteU;
             _wv = Atlas.WhiteV;
+            Atlas.Resized += OnAtlasResized;
 
             _program = ShaderProgram.Create("ui", Shaders.UI_VS, Shaders.UI_FS);
             _screen = _program.Uniform("uScreen");
@@ -210,10 +211,11 @@ namespace BimGo.Rendering
             float top = MathF.Round(y);
             for (int i = 0; i < text.Length; i++)
             {
-                ref readonly Glyph glyph = ref font.Get(text[i]);
+                int codePoint = UiFont.NextCodePoint(text, ref i);
+                ref readonly Glyph glyph = ref font.Get(codePoint);
                 if (!glyph.Valid) { continue; }
 
-                if (text[i] != ' ')
+                if (codePoint != ' ')
                 {
                     float gx = MathF.Round(pen + glyph.OffsetX), gy = top + glyph.OffsetY;
                     float gx1 = gx + glyph.Width, gy1 = gy + glyph.Height;
@@ -232,7 +234,7 @@ namespace BimGo.Rendering
             float width = 0f;
             for (int i = 0; i < text.Length; i++)
             {
-                width += font.Get(text[i]).Advance + tracking;
+                width += font.Get(UiFont.NextCodePoint(text, ref i)).Advance + tracking;
             }
             return width;
         }
@@ -275,11 +277,12 @@ namespace BimGo.Rendering
                 int i = start, lastSpace = -1;
                 while (i < text.Length && text[i] != '\n')
                 {
-                    float advance = font.Get(text[i]).Advance;
+                    int next = i;
+                    float advance = font.Get(UiFont.NextCodePoint(text, ref next)).Advance;
                     if (width + advance > maxWidth && i > start) { break; }
                     if (text[i] == ' ') { lastSpace = i; }
                     width += advance;
-                    i++;
+                    i = next + 1;
                 }
 
                 int end = (i >= text.Length || text[i] == '\n') ? i : (lastSpace > start ? lastSpace : i);
@@ -309,11 +312,12 @@ namespace BimGo.Rendering
                 int i = start, lastSpace = -1;
                 while (i < text.Length && text[i] != '\n')
                 {
-                    float advance = font.Get(text[i]).Advance;
+                    int next = i;
+                    float advance = font.Get(UiFont.NextCodePoint(text, ref next)).Advance;
                     if (width + advance > maxWidth && i > start) { break; }
                     if (text[i] == ' ') { lastSpace = i; }
                     width += advance;
-                    i++;
+                    i = next + 1;
                 }
 
                 int end = (i >= text.Length || text[i] == '\n') ? i : (lastSpace > start ? lastSpace : i);
@@ -517,6 +521,21 @@ namespace BimGo.Rendering
 
         #region Flush
 
+        /// <summary>
+        /// The atlas grew (new characters filled it): what is already queued used the old texture coordinates, which
+        /// all scale by the same factor (images flush before and after themselves, so the queue only holds atlas UVs).
+        /// </summary>
+        private void OnAtlasResized(float factor)
+        {
+            _wu = Atlas.WhiteU;
+            _wv = Atlas.WhiteV;
+            for (int i = 0; i < _count; i++)
+            {
+                _vertices[i].U *= factor;
+                _vertices[i].V *= factor;
+            }
+        }
+
         private void Push(float x, float y, float u, float v, uint colour)
         {
             if (_count == _vertices.Length) { Array.Resize(ref _vertices, _vertices.Length * 2); }
@@ -553,6 +572,9 @@ namespace BimGo.Rendering
         private void Flush(int screenWidth, int screenHeight, uint texture)
         {
             if (_count == 0) { return; }
+
+            // Characters first seen this frame were rasterised on the CPU: upload them before the atlas is sampled
+            if (texture == 0) { Atlas.Sync(); }
 
             Gl.BindVertexArray(_vao);
             Gl.BindBuffer(Gl.ARRAY_BUFFER, _vbo);
@@ -591,6 +613,7 @@ namespace BimGo.Rendering
         public void Dispose()
         {
             _program?.Dispose();
+            if (Atlas != null) { Atlas.Resized -= OnAtlasResized; }
             Atlas?.Dispose();
             Gl.DeleteBuffer(_vbo);
             Gl.DeleteVertexArray(_vao);

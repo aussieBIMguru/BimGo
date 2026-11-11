@@ -100,7 +100,9 @@ Not shipped with BimGo
   from the user's own Revit installation and never copied into BimGo's output.
   No Autodesk files, textures or content are included.
 - Fonts: the interface draws text with fonts already installed in Windows
-  (Bahnschrift, Segoe UI, Consolas, with fallbacks). No font files are shipped.
+  (Bahnschrift, Segoe UI, Consolas; for other scripts, whichever Windows font
+  has the character, such as Microsoft YaHei UI, Yu Gothic UI, Malgun Gothic or
+  Nirmala UI). No font files are shipped.
 - OpenGL: provided by Windows and the graphics driver; all shaders are
   BimGo's own.
 - Video encoding (walkthrough video, MP4 / H.264): done by Windows Media

@@ -92,7 +92,7 @@ namespace BimGo.Native
             // GL 1.1 (opengl32.dll exports)
             "glClear", "glClearColor", "glClearDepth", "glViewport", "glScissor", "glEnable", "glDisable",
             "glDepthFunc", "glDepthMask", "glBlendFunc", "glCullFace", "glFrontFace", "glPolygonOffset", "glGetString",
-            "glGetIntegerv", "glGetError", "glBindTexture", "glGenTextures", "glDeleteTextures", "glTexImage2D",
+            "glGetIntegerv", "glGetError", "glBindTexture", "glGenTextures", "glDeleteTextures", "glTexImage2D", "glTexSubImage2D",
             "glTexParameteri", "glPixelStorei", "glDrawElements", "glDrawArrays", "glColorMask", "glDrawBuffer",
             "glReadBuffer", "glReadPixels", "glStencilFunc", "glStencilOp", "glStencilMask", "glClearStencil", "glPolygonMode",
 
@@ -233,6 +233,9 @@ namespace BimGo.Native
 
         public static void TexImage2D(uint target, int level, uint internalFormat, int width, int height, uint format, uint type, void* pixels)
             => _gl.TexImage2D((GLEnum)target, level, (int)internalFormat, (uint)width, (uint)height, 0, (GLEnum)format, (GLEnum)type, pixels);
+
+        public static void TexSubImage2D(uint target, int level, int x, int y, int width, int height, uint format, uint type, void* pixels)
+            => _gl.TexSubImage2D((GLEnum)target, level, x, y, (uint)width, (uint)height, (GLEnum)format, (GLEnum)type, pixels);
 
         public static void TexImage3D(uint target, int level, uint internalFormat, int width, int height, int depth, uint format, uint type, void* pixels)
             => _gl.TexImage3D((GLEnum)target, level, (int)internalFormat, (uint)width, (uint)height, (uint)depth, 0, (GLEnum)format, (GLEnum)type, pixels);

@@ -28,7 +28,7 @@ the installer all read it.
 1. **On `dev`: bump the version.** Edit `src/Directory.Build.props`, and add a row to `HISTORY.md`. Commit:
    ```
    git checkout dev
-   git commit -am "Version 1.0.1"
+   git commit -am "Version 1.1.0"
    git push
    ```
 2. **Merge to `main`** with your usual pull request (dev → main), and wait for it to merge.
@@ -39,19 +39,19 @@ the installer all read it.
    powershell -ExecutionPolicy Bypass -File build\publish.ps1
    ```
    It runs the tests, publishes the app, builds BimGo for Revit 2025–2027 and writes
-   `artifacts\BimGo-Setup-1.0.1.exe` (plus a `.sha256.txt` checksum). `artifacts\` is never committed.
+   `artifacts\BimGo-Setup-1.1.0.exe` (plus a `.sha256.txt` checksum). `artifacts\` is never committed.
 4. **Test the setup** on a PC (or a Windows user) without your dev builds: install, open a `.bimgo`, Go from Revit,
    uninstall. The test list is in `DEVELOPING.md` (Installer).
 5. **Tag the release** (a tag starting with `v`, on the commit you built):
    ```
-   git tag -a v1.0.1 -m "BimGo 1.0.1"
-   git push origin v1.0.1
+   git tag -a v1.1.0 -m "BimGo 1.1.0"
+   git push origin v1.1.0
    ```
-6. **Publish the GitHub Release**: on GitHub open **Releases → Draft a new release**, choose the tag `v1.0.1`, title it
-   "BimGo 1.0.1", write a few lines of what changed (from `HISTORY.md`), attach `BimGo-Setup-1.0.1.exe` and the
+6. **Publish the GitHub Release**: on GitHub open **Releases → Draft a new release**, choose the tag `v1.1.0`, title it
+   "BimGo 1.1.0", write a few lines of what changed (from `HISTORY.md`), attach `BimGo-Setup-1.1.0.exe` and the
    `.sha256.txt`, and click **Publish release**. Or from the command line:
    ```
-   gh release create v1.0.1 artifacts\BimGo-Setup-1.0.1.exe artifacts\BimGo-Setup-1.0.1.sha256.txt --title "BimGo 1.0.1" --notes-file notes.md
+   gh release create v1.1.0 artifacts\BimGo-Setup-1.1.0.exe artifacts\BimGo-Setup-1.1.0.sha256.txt --title "BimGo 1.1.0" --notes-file notes.md
    ```
    Tick **Set as a pre-release** for a beta (for example tag `v1.1.0-beta.1`).
 7. **Back to work:** `git checkout dev` and `git merge main` (so `dev` has the release commit), then carry on.

@@ -42,7 +42,7 @@ namespace BimGo.Tests
             Assert.AreEqual(BimGoFormat.FORMAT_NAME, manifest.Format);
             Assert.AreEqual(BimGoFormat.FORMAT_VERSION, manifest.FormatVersion);
             Assert.AreEqual("BimGo.Tests", manifest.Generator);
-            Assert.AreEqual("1.0.0", manifest.GeneratorVersion);
+            Assert.AreEqual("0.0.0-test", manifest.GeneratorVersion);
             Assert.AreEqual(FileKinds.SAVE, manifest.Kind);
             Assert.AreEqual("Test Model", manifest.Title);
             Assert.AreEqual(document.CreatedUtc, manifest.CreatedUtc);

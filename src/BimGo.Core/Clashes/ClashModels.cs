@@ -838,7 +838,7 @@ namespace BimGo.Clashes
         /// <summary>Report header: the model key (<c>ModelProvenance</c>), or null.</summary>
         public string ModelKey { get; set; }
 
-        /// <summary>Report header: who wrote it ("BimGo 1.0.0"), or null.</summary>
+        /// <summary>Report header: who wrote it ("BimGo X.X.X"), or null.</summary>
         public string Generator { get; set; }
 
         /// <summary>Report header: when it was exported (UTC), or null.</summary>

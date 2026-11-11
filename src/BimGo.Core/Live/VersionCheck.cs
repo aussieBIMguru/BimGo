@@ -18,7 +18,7 @@ namespace BimGo.Live
             return va.Major == vb.Major && va.Minor == vb.Minor && Math.Max(va.Build, 0) == Math.Max(vb.Build, 0);
         }
 
-        /// <summary>The release part of a version ("1.0.0.0" → "1.0.0"; unreadable → the text as given).</summary>
+        /// <summary>The release part of a version ("X.0.0.0" → "X.0.0"; unreadable → the text as given).</summary>
         public static string Release(string version) =>
             TryParse(version, out Version v) ? $"{v.Major}.{v.Minor}.{Math.Max(v.Build, 0)}" : (version ?? string.Empty).Trim();
 

@@ -19,7 +19,7 @@ namespace BimGo
     /// </summary>
     internal static class Program
     {
-        /// <summary>The app version ("1.0.0", from the assembly).</summary>
+        /// <summary>The app version (from the assembly).</summary>
         public static string Version { get; } = GetVersion();
 
         [STAThread]

@@ -370,6 +370,21 @@ namespace BimGo.Native
         [DllImport("gdi32.dll")]
         public static extern bool SwapBuffers(nint hdc);
 
+        // Font coverage checks for the UI atlas (Rendering/UiFont.cs, FontCoverage)
+        [DllImport("gdi32.dll")]
+        public static extern nint CreateCompatibleDC(nint hdc);
+
+        [DllImport("gdi32.dll")]
+        public static extern nint SelectObject(nint hdc, nint obj);
+
+        [DllImport("gdi32.dll", CharSet = CharSet.Unicode)]
+        public static extern nint CreateFontW(int height, int width, int escapement, int orientation, int weight,
+            uint italic, uint underline, uint strikeOut, uint charSet, uint outPrecision, uint clipPrecision,
+            uint quality, uint pitchAndFamily, string faceName);
+
+        [DllImport("gdi32.dll")]
+        public static extern uint GetGlyphIndicesW(nint hdc, char* text, int count, ushort* indices, uint flags);
+
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
         public static extern nint GetModuleHandleW(string moduleName);
 

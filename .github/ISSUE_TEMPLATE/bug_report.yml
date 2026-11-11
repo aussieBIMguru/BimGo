@@ -1,0 +1,86 @@
+name: Bug report
+description: Something in BimGo or BimGo for Revit doesn't work as it should.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. If BimGo won't start, try a **safe start** first (hold **Shift** while launching it) and say below whether it helped.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+      placeholder: "I pressed Go in Revit 2026 and..."
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open a model in Revit 2026
+        2. BimGo tab → Go
+        3. ...
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: BimGo version
+      description: In the pause menu footer, the F1 sheet, or the installer's file name (e.g. 1.0.0).
+      placeholder: "1.0.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where does it happen?
+      multiple: true
+      options:
+        - BimGo app (opening a .bimgo file)
+        - Live session from Revit (Go)
+        - Revit add-in (ribbon, Options, Export, comment markers)
+        - Installer / uninstaller
+        - Kiosk mode
+        - Not sure
+    validations:
+      required: true
+  - type: dropdown
+    id: revit
+    attributes:
+      label: Revit version
+      multiple: true
+      options:
+        - Revit 2025
+        - Revit 2026
+        - Revit 2027
+        - Not using Revit
+    validations:
+      required: false
+  - type: input
+    id: gpu
+    attributes:
+      label: Graphics card and Windows version
+      description: "Windows: Settings → System → About. GPU: Task Manager → Performance → GPU."
+      placeholder: "NVIDIA RTX A2000, Windows 11 23H2"
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Attach or paste the end of the log(s) from `%LocalAppData%\BimGo\Logs`: `BimGo.App.log` (the app) and/or `BimGo.Revit.log` (the add-in). Drag the files into this box.
+        Please check them for anything you'd rather not share publicly (file paths, model names).
+      render: text
+    validations:
+      required: false
+  - type: textarea
+    id: extra
+    attributes:
+      label: Screenshots or anything else
+      description: Screenshots, a short video, or a small test model (no confidential projects) help a lot.
+    validations:
+      required: false

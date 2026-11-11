@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: User guide
+    url: https://github.com/aussieBIMguru/BimGo/tree/main/docs
+    about: Getting started, every tool, and troubleshooting (safe start, logs, Revit not loading the add-in).
+  - name: Latest release
+    url: https://github.com/aussieBIMguru/BimGo/releases/latest
+    about: Check you're on the newest version before reporting a bug.

@@ -1,0 +1,26 @@
+name: Idea or feature request
+description: Suggest an improvement or a new feature.
+title: "[Idea] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The task or situation, rather than the solution. E.g. "I review fire egress paths with the client and..."
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help?
+      description: How you imagine it working in BimGo (or Revit).
+    validations:
+      required: false
+  - type: textarea
+    id: today
+    attributes:
+      label: How do you do it today?
+      description: Another tool, a workaround, or not at all.
+    validations:
+      required: false
